@@ -50,6 +50,9 @@ export const Marketplace: React.FC = () => {
   );
   const { search: searchQuery, skills: selectedSkills, sort: sortBy, view: viewMode, tab: activeTab, page } = filters;
 
+  // Debounce the search term so filtering only runs once typing settles.
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 250);
+
   const updateFilters = useCallback(
     (patch: Partial<MarketplaceFilters>) => {
       setSearchParams(encodeMarketplaceFilters({ ...filters, ...patch }), {
@@ -205,7 +208,7 @@ export const Marketplace: React.FC = () => {
   }, [hasNextJobsPage, isFetchingNextJobsPage, fetchNextJobsPage]);
 
   // Filter agents
-  const filteredAgents = agents
+  const filteredAgents = useMemo(() => agents
     .filter(agent => {
       if (!agent.isActive) return false;
       if (searchQuery) {
@@ -231,10 +234,10 @@ export const Marketplace: React.FC = () => {
         case 'recent': return b.createdAt - a.createdAt;
         default: return 0;
       }
-    });
+    }), [agents, searchQuery, selectedSkills, sortBy]);
 
   // Filter jobs
-  const filteredJobs = jobs
+  const filteredJobs = useMemo(() => jobs
     .filter(job => {
       if (job.status !== 'Open') return false;
       if (searchQuery) {
@@ -252,7 +255,7 @@ export const Marketplace: React.FC = () => {
       }
       return true;
     })
-    .sort((a, b) => b.budget - a.budget);
+    .sort((a, b) => b.budget - a.budget), [jobs, searchQuery, selectedSkills]);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('en-US', {
