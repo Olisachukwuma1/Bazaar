@@ -28,6 +28,7 @@ import {
   type UploadProgress,
 } from '@/lib/ipfs';
 import { isAddressBlocked } from '@/lib/compliance';
+import { notify } from '@/lib/notify';
 
 /**
  * Number of days after escrow creation beyond which the client may reclaim
@@ -185,14 +186,14 @@ export const JobDetail: React.FC = () => {
     if (!publicKey) return;
     const client = getContractClient();
     if (!client) {
-      alert('Not connected to the marketplace contract. Configure it in Settings.');
+      notify.error('Not connected to the marketplace contract. Configure it in Settings.');
       return;
     }
     // Compliance: re-check the blocklist right before submitting so a stale
     // cache cannot let a blocked address post a bid.
     try {
       if (await isAddressBlocked(publicKey, client)) {
-        alert(
+        notify.error(
           'Compliance error: your wallet address is blocked from participating in this marketplace. ' +
             'Bidding is not permitted. Contact support if you believe this is a mistake.',
         );
@@ -201,7 +202,7 @@ export const JobDetail: React.FC = () => {
       }
     } catch (err) {
       console.error('Compliance check failed:', err);
-      alert('Unable to verify compliance status. Please try again later.');
+      notify.error('Unable to verify compliance status. Please try again later.');
       return;
     }
     setIsActing(true);
@@ -220,7 +221,7 @@ export const JobDetail: React.FC = () => {
         queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] }),
         queryClient.invalidateQueries({ queryKey: ['job-bids', jobIdNum] }),
       ]);
-      alert('Bid placed successfully!');
+      notify.success('Bid placed successfully!');
     } catch (err) {
       console.error('Bid failed:', err);
       alert(err instanceof Error ? err.message : 'Failed to place bid. Please try again.');

@@ -25,6 +25,7 @@ import {
   isIpfsConfigured,
   type UploadProgress,
 } from '@/lib/ipfs';
+import { notify } from '@/lib/notify';
 import {
   AgentMetadataSchema,
   metadataUriSchema,
@@ -167,7 +168,7 @@ export const RegisterAgent: React.FC = () => {
 
   const handleUploadJson = async () => {
     if (!isIpfsConfigured()) {
-      alert('VITE_IPFS_API_KEY is not set. Add it to your .env.local file and restart the dev server.');
+      notify.error('VITE_IPFS_API_KEY is not set. Add it to your .env.local file and restart the dev server.');
       return;
     }
     const metadata = buildMetadataJson();
@@ -185,7 +186,7 @@ export const RegisterAgent: React.FC = () => {
 
   const handlePinningUpload = async () => {
     if (!isPinningConfigured()) {
-      alert(
+      notify.error(
         'VITE_PINNING_SERVICE_URL is not set. Add it to your .env.local file and restart the dev server.',
       );
       return;
@@ -209,7 +210,7 @@ export const RegisterAgent: React.FC = () => {
   const handleUploadFile = async () => {
     if (!selectedFile) return;
     if (!isIpfsConfigured()) {
-      alert('VITE_IPFS_API_KEY is not set. Add it to your .env.local file and restart the dev server.');
+      notify.error('VITE_IPFS_API_KEY is not set. Add it to your .env.local file and restart the dev server.');
       return;
     }
     setIpfsProgress({ percent: null, status: 'uploading' });
@@ -243,11 +244,11 @@ export const RegisterAgent: React.FC = () => {
 
   const onSubmit = async (data: RegisterAgentForm) => {
     if (!publicKey) {
-      alert('Please connect your wallet first');
+      notify.error('Please connect your wallet first');
       return;
     }
     if (selectedSkills.length === 0) {
-      alert('Please select at least one skill');
+      notify.error('Please select at least one skill');
       return;
     }
 
