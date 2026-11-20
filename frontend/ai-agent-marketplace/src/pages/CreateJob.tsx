@@ -12,12 +12,15 @@ import { useWallet } from '@/contexts/WalletContext';
 import { useStellar } from '@/contexts/StellarContext';
 import { networkConfig } from '../config/network';
 import { isAddressBlocked } from '@/lib/compliance';
+import { formatUnits, parseUnits } from '@/lib/usdc';
 import {
   DollarSign, CheckCircle, AlertCircle,
   ArrowLeft, Send, Wallet, X, Tag, ArrowUpDown,
   Shield, FileText
 } from 'lucide-react';
+import { notify } from '@/lib/notify';
 import { clsx } from 'clsx';
+import { SKILL_CATEGORIES, getSkillColor } from '@/constants/skills';
 
 const ALL_SKILLS = [
   'python', 'javascript', 'typescript', 'rust', 'go', 'java', 'cpp',
@@ -42,7 +45,18 @@ const createJobSchema = z.object({
   title: z.string().min(5, 'Title must be at least 5 characters').max(100, 'Title too long'),
   description: z.string().min(50, 'Description must be at least 50 characters').max(5000, 'Description too long'),
   requiredSkills: z.array(z.string()).min(1, 'Select at least one required skill'),
-  budget: z.number().min(10, 'Minimum budget is $10 USDC').max(1000000, 'Budget too high'),
+  budget: z
+    .string()
+    .trim()
+    .regex(/^\d+(\.\d{1,7})?$/, 'Enter a valid USDC amount (max 7 decimal places)')
+    .refine((value) => {
+      try {
+        const stroops = parseUnits(value);
+        return stroops >= parseUnits('10') && stroops <= parseUnits('1000000');
+      } catch {
+        return false;
+      }
+    }, 'Budget must be between $10 and $1,000,000 USDC'),
   deadlineDays: z.number().min(1, 'Minimum 1 day').max(30, 'Maximum 30 days'),
 });
 
@@ -69,15 +83,16 @@ export const CreateJob: React.FC = () => {
       title: '',
       description: '',
       requiredSkills: [],
-      budget: 100,
+      budget: '100',
       deadlineDays: 7,
     },
   });
 
   const budget = watch('budget');
   const deadlineDays = watch('deadlineDays');
-  const platformFee = Math.round((budget || 0) * 0.01 * 100) / 100; // 1%
-  const totalCost = (budget || 0) + platformFee;
+  const budgetStroops = safeParseUnits(budget);
+  const platformFeeStroops = budgetStroops / 100n; // 1%
+  const totalCostStroops = budgetStroops + platformFeeStroops;
 
   const toggleSkill = (skill: string) => {
     setSelectedSkills(prev => {
@@ -97,15 +112,15 @@ export const CreateJob: React.FC = () => {
 
   const onSubmit = async (data: CreateJobForm) => {
     if (networkConfig.network === 'mainnet') {
-      const budgetNum = Number(data.budget);
-      const fee = budgetNum * 0.01;
+      const budgetStroops = parseUnits(data.budget);
+      const feeStroops = budgetStroops / 100n;
       const ok = window.confirm(
-        `You are on MAINNET. This will lock ${budgetNum} USDC plus ~${fee.toFixed(4)} USDC platform fee. Continue?`,
+        `You are on MAINNET. This will lock ${formatUnits(budgetStroops)} USDC plus ~${formatUnits(feeStroops)} USDC platform fee. Continue?`,
       );
       if (!ok) return;
     }
     if (!publicKey) {
-      alert('Please connect your wallet first');
+      notify.error('Please connect your wallet first');
       return;
     }
 
@@ -131,23 +146,25 @@ export const CreateJob: React.FC = () => {
           'Compliance restriction: this wallet address is blocked and cannot post jobs. ' +
           'If you believe this is an error, please contact support.';
         setComplianceError(message);
-        alert(message);
+        notify.error(message);
         return;
       }
 
-      await client.postJob(publicKey, signTransaction, {
+      // Builds, simulates, signs (Freighter) and submits the real `post_job`
+      // transaction, then waits for confirmation before returning the job id.
+      const jobId = await client.postJob(publicKey, signTransaction, {
         title: data.title,
         description: data.description,
         requiredSkills: data.requiredSkills,
-        budget: Math.round(data.budget * 10000000), // Convert to stroops
+        budget: Number(parseUnits(data.budget)), // Convert to stroops
         deadlineDays: data.deadlineDays,
       });
 
       alert('Job posted successfully!');
-      navigate('/marketplace');
+      navigate(Number.isFinite(jobId) && jobId > 0 ? `/job/${jobId}` : '/marketplace');
     } catch (err) {
       console.error('Failed to post job:', err);
-      alert(err instanceof Error ? err.message : 'Failed to post job. Please try again.');
+      notify.error(err instanceof Error ? err.message : 'Failed to post job. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -305,12 +322,10 @@ export const CreateJob: React.FC = () => {
               <div className="grid md:grid-cols-2 gap-6">
                 <Input
                   label="Budget (USDC)"
-                  type="number"
-                  step="0.01"
-                  min="10"
-                  max="1000000"
+                  type="text"
+                  inputMode="decimal"
                   placeholder="100.00"
-                  {...register('budget', { valueAsNumber: true })}
+                  {...register('budget')}
                   error={errors.budget?.message}
                 />
                 
@@ -331,15 +346,15 @@ export const CreateJob: React.FC = () => {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Job Budget</span>
-                    <span>{budget ? formatPrice(budget * 10000000) : '$0.00'}</span>
+                    <span>{formatPrice(budgetStroops)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Platform Fee (1%)</span>
-                    <span>{formatPrice(platformFee * 10000000)}</span>
+                    <span>{formatPrice(platformFeeStroops)}</span>
                   </div>
                   <div className="border-t pt-2 flex justify-between font-medium">
                     <span>Total Cost</span>
-                    <span>{formatPrice(totalCost * 10000000)}</span>
+                    <span>{formatPrice(totalCostStroops)}</span>
                   </div>
                 </div>
               </div>

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -13,16 +13,7 @@ import { QueryError } from '@/components/ui/QueryError';
 import { format } from 'date-fns/format';
 import { formatDistanceToNow } from 'date-fns/formatDistanceToNow';
 import { clsx } from 'clsx';
-
-const ALL_SKILLS = [
-  'python', 'javascript', 'typescript', 'rust', 'go', 'java', 'cpp',
-  'machine-learning', 'deep-learning', 'nlp', 'computer-vision', 'data-science',
-  'pytorch', 'tensorflow', 'jax', 'huggingface', 'langchain', 'openai-api',
-  'smart-contracts', 'soroban', 'stellar', 'blockchain', 'web3', 'defi',
-  'react', 'vue', 'nextjs', 'nodejs', 'express', 'fastapi', 'django',
-  'postgresql', 'mongodb', 'redis', 'docker', 'kubernetes', 'aws', 'gcp',
-  'trading', 'quantitative-analysis', 'risk-management', 'portfolio-optimization',
-];
+import { ALL_SKILLS, getSkillColor } from '@/constants/skills';
 
 /** Number of items fetched per page from the contract. */
 const PAGE_SIZE = 20;
@@ -31,11 +22,52 @@ export const Marketplace: React.FC = () => {
   const { publicKey, isConnected } = useWallet();
   const { getContractClient } = useStellar();
   const queryClient = useQueryClient();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
-  const [sortBy, setSortBy] = useState<'reputation' | 'price' | 'jobs' | 'recent'>('reputation');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [activeTab, setActiveTab] = useState<'agents' | 'jobs'>('agents');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // URL is the source of truth for filters, sort, view, tab and page.
+  const filters = useMemo(
+    () => decodeMarketplaceFilters(searchParams),
+    [searchParams],
+  );
+  const { search: searchQuery, skills: selectedSkills, sort: sortBy, view: viewMode, tab: activeTab, page } = filters;
+
+  // Debounce the search term so filtering only runs once typing settles.
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 250);
+
+  const updateFilters = useCallback(
+    (patch: Partial<MarketplaceFilters>) => {
+      setSearchParams(encodeMarketplaceFilters({ ...filters, ...patch }), {
+        replace: false,
+      });
+    },
+    [filters, setSearchParams],
+  );
+
+  const setSearchQuery = useCallback(
+    (value: string) => updateFilters({ search: value, page: 1 }),
+    [updateFilters],
+  );
+  const setSelectedSkills = useCallback(
+    (updater: (prev: string[]) => string[]) =>
+      updateFilters({ skills: updater(filters.skills), page: 1 }),
+    [filters.skills, updateFilters],
+  );
+  const setSortBy = useCallback(
+    (value: MarketplaceSort) => updateFilters({ sort: value, page: 1 }),
+    [updateFilters],
+  );
+  const setViewMode = useCallback(
+    (value: MarketplaceView) => updateFilters({ view: value }),
+    [updateFilters],
+  );
+  const setActiveTab = useCallback(
+    (value: MarketplaceTab) => updateFilters({ tab: value }),
+    [updateFilters],
+  );
+  const setPage = useCallback(
+    (value: number) => updateFilters({ page: value }),
+    [updateFilters],
+  );
 
   // Sentinel refs for infinite-scroll intersection observer
   const agentsSentinelRef = useRef<HTMLDivElement>(null);
@@ -157,7 +189,7 @@ export const Marketplace: React.FC = () => {
   }, [hasNextJobsPage, isFetchingNextJobsPage, fetchNextJobsPage]);
 
   // Filter agents
-  const filteredAgents = agents
+  const filteredAgents = useMemo(() => agents
     .filter(agent => {
       if (!agent.isActive) return false;
       if (searchQuery) {
@@ -183,10 +215,10 @@ export const Marketplace: React.FC = () => {
         case 'recent': return b.createdAt - a.createdAt;
         default: return 0;
       }
-    });
+    }), [agents, searchQuery, selectedSkills, sortBy]);
 
   // Filter jobs
-  const filteredJobs = jobs
+  const filteredJobs = useMemo(() => jobs
     .filter(job => {
       if (job.status !== 'Open') return false;
       if (searchQuery) {
@@ -204,7 +236,7 @@ export const Marketplace: React.FC = () => {
       }
       return true;
     })
-    .sort((a, b) => b.budget - a.budget);
+    .sort((a, b) => b.budget - a.budget), [jobs, searchQuery, selectedSkills]);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -219,19 +251,6 @@ export const Marketplace: React.FC = () => {
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
     if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
     return num.toString();
-  };
-
-  const getSkillColor = (skill: string) => {
-    const colors = [
-      'bg-primary/10 text-primary',
-      'bg-stellar/10 text-stellar',
-      'bg-green-500/10 text-green-500',
-      'bg-orange-500/10 text-orange-500',
-      'bg-pink-500/10 text-pink-500',
-      'bg-cyan-500/10 text-cyan-500',
-    ];
-    const hash = skill.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return colors[hash % colors.length];
   };
 
   const handleSkillToggle = (skill: string) => {
@@ -809,4 +828,5 @@ const getSkillColor = (skill: string) => {
 };
 
 // Re-export for use in other components
-export { formatPrice, getSkillColor, formatNumber, format };
+export { formatPrice, formatNumber, format };
+export { getSkillColor } from '@/constants/skills';

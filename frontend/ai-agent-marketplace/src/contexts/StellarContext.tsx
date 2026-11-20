@@ -5,6 +5,7 @@ import {
   Networks,
   TransactionBuilder,
   Transaction,
+  Account,
   BASE_FEE,
   Address,
   xdr,
@@ -58,6 +59,37 @@ export interface StellarContextType {
 
 const StellarContext = createContext<StellarContextType | null>(null);
 
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * Decide whether an RPC URL may be used insecurely (plain HTTP).
+ * HTTP is only tolerated in development builds or for loopback hosts;
+ * production builds must use HTTPS.
+ */
+export function resolveAllowHttp(
+  rpcUrl: string,
+  isDev: boolean = Boolean(import.meta.env.DEV),
+): boolean {
+  let url: URL;
+  try {
+    url = new URL(rpcUrl);
+  } catch {
+    throw new Error(`Invalid RPC URL: ${rpcUrl}`);
+  }
+
+  if (url.protocol === 'https:') return false;
+
+  if (url.protocol !== 'http:') {
+    throw new Error(`Unsupported RPC URL protocol "${url.protocol}" in ${rpcUrl}. Use https://.`);
+  }
+
+  if (isDev || LOCAL_HOSTS.has(url.hostname)) return true;
+
+  throw new Error(
+    `Insecure RPC URL "${rpcUrl}" is not allowed in production. Use an https:// endpoint.`,
+  );
+}
+
 export const useStellar = () => {
   const context = useContext(StellarContext);
   if (!context) throw new Error('useStellar must be used within StellarProvider');
@@ -72,7 +104,9 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const connect = useCallback(async (newConfig: ContractConfig) => {
     try {
-      const rpcServer = new SorobanRpc.Server(newConfig.rpcUrl, { allowHttp: true });
+      const rpcServer = new SorobanRpc.Server(newConfig.rpcUrl, {
+        allowHttp: resolveAllowHttp(newConfig.rpcUrl),
+      });
       const contractInstance = new Contract(newConfig.contractId);
       
       await rpcServer.getLatestLedger();
@@ -154,7 +188,7 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
       throw new Error(describeSimulationError(simResult.error));
     }
     
-    return (simResult as SorobanRpc.Api.SimulateTransactionSuccessResponse).result?.retval ?? null;
+    return simResult.result?.retval ?? null;
   }, [contract, rpc, config]);
 
   // Build, sign and submit a real transaction (as opposed to `invokeContract`,

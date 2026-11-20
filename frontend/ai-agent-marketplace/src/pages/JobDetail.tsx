@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -28,6 +28,7 @@ import {
   type UploadProgress,
 } from '@/lib/ipfs';
 import { isAddressBlocked } from '@/lib/compliance';
+import { notify } from '@/lib/notify';
 
 /**
  * Number of days after escrow creation beyond which the client may reclaim
@@ -55,7 +56,6 @@ export const JobDetail: React.FC = () => {
   const [bidProposal, setBidProposal] = useState('');
   const [showDeliverableModal, setShowDeliverableModal] = useState(false);
   const [deliverableNote, setDeliverableNote] = useState('');
-  const [isActing, setIsActing] = useState(false);
 
   // Review form state
   const [reviewRating, setReviewRating] = useState(0);
@@ -185,14 +185,14 @@ export const JobDetail: React.FC = () => {
     if (!publicKey) return;
     const client = getContractClient();
     if (!client) {
-      alert('Not connected to the marketplace contract. Configure it in Settings.');
+      notify.error('Not connected to the marketplace contract. Configure it in Settings.');
       return;
     }
     // Compliance: re-check the blocklist right before submitting so a stale
     // cache cannot let a blocked address post a bid.
     try {
       if (await isAddressBlocked(publicKey, client)) {
-        alert(
+        notify.error(
           'Compliance error: your wallet address is blocked from participating in this marketplace. ' +
             'Bidding is not permitted. Contact support if you believe this is a mistake.',
         );
@@ -201,7 +201,7 @@ export const JobDetail: React.FC = () => {
       }
     } catch (err) {
       console.error('Compliance check failed:', err);
-      alert('Unable to verify compliance status. Please try again later.');
+      notify.error('Unable to verify compliance status. Please try again later.');
       return;
     }
     setIsActing(true);
@@ -220,7 +220,7 @@ export const JobDetail: React.FC = () => {
         queryClient.invalidateQueries({ queryKey: ['job', jobIdNum] }),
         queryClient.invalidateQueries({ queryKey: ['job-bids', jobIdNum] }),
       ]);
-      alert('Bid placed successfully!');
+      notify.success('Bid placed successfully!');
     } catch (err) {
       console.error('Bid failed:', err);
       alert(err instanceof Error ? err.message : 'Failed to place bid. Please try again.');
