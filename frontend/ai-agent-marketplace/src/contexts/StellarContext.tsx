@@ -19,6 +19,7 @@ import {
   describeSimulationError,
   formatTokenAmount,
 } from '@/lib/marketplaceClient';
+import { tryLoadEnvConfig } from '@/config/env';
 
 export interface ContractConfig {
   contractId: string;
@@ -310,17 +311,16 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
-    // No saved config — fall back to the build-time contract config (see
-    // .env.example) so the marketplace connects automatically rather than
-    // requiring a manual "connect" step that the UI never actually offers.
-    const envContractId = import.meta.env.VITE_CONTRACT_ID;
-    const envRpcUrl = import.meta.env.VITE_RPC_URL;
-    const envNetworkPassphrase = import.meta.env.VITE_NETWORK_PASSPHRASE;
-    if (envContractId && envRpcUrl && envNetworkPassphrase) {
+    // No saved config — fall back to the validated build-time env config (see
+    // src/config/env.ts and .env.example) so the marketplace connects
+    // automatically rather than requiring a manual "connect" step that the UI
+    // never actually offers. Invalid env is surfaced by <EnvErrorScreen />.
+    const { config: envConfig } = tryLoadEnvConfig();
+    if (envConfig) {
       connect({
-        contractId: envContractId,
-        rpcUrl: envRpcUrl,
-        networkPassphrase: envNetworkPassphrase,
+        contractId: envConfig.VITE_CONTRACT_ID,
+        rpcUrl: envConfig.VITE_RPC_URL,
+        networkPassphrase: envConfig.VITE_NETWORK_PASSPHRASE,
       }).catch((err) => console.error('Failed to auto-connect using env contract config:', err));
     }
   }, [connect]);

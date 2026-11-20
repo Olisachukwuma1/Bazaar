@@ -1,6 +1,8 @@
 import React, { Suspense, lazy, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { EnvErrorScreen } from './components/EnvErrorScreen';
+import { tryLoadEnvConfig } from './config/env';
 
 const Marketplace = lazy(() => import('./pages/Marketplace').then((m) => ({ default: m.Marketplace })));
 const AgentProfile = lazy(() => import('./pages/AgentProfile').then((m) => ({ default: m.AgentProfile })));
@@ -32,6 +34,10 @@ function App() {
       document.documentElement.classList.remove('dark');
     }
   }, []);
+
+  // Fail fast with a readable screen when the build-time env config is invalid.
+  const { error: envError } = tryLoadEnvConfig();
+  if (envError) return <EnvErrorScreen error={envError} />;
 
   return (
     <div className="min-h-screen bg-background">
