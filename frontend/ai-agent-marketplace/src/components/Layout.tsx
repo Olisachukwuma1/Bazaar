@@ -8,6 +8,7 @@ import { TransactionStatus } from './TransactionStatus';
 // Only the icons actually rendered are imported so the bundler can tree-shake
 // the rest of lucide-react out of the vendor chunk.
 import { Lock } from 'lucide-react';
+import { networkConfig } from '../config/network';
 
 /**
  * nav items that require a connected wallet carry `auth: true`.
@@ -49,6 +50,15 @@ export const Layout: React.FC = () => {
           <Link to="/marketplace" className="flex items-center space-x-2">
             <span className="text-2xl">🤖</span>
             <span className="text-xl font-bold text-primary">AgentMarket</span>
+            <span
+              className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                networkConfig.network === 'mainnet'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-amber-500 text-black'
+              }`}
+            >
+              {networkConfig.label}
+            </span>
           </Link>
 
           {/* Desktop nav */}

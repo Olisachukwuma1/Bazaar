@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Badge } from '@/components/ui/Badge';
 import { useWallet } from '@/contexts/WalletContext';
 import { useStellar } from '@/contexts/StellarContext';
+import { networkConfig } from '../config/network';
 import { isAddressBlocked } from '@/lib/compliance';
 import {
   DollarSign, CheckCircle, AlertCircle,
@@ -95,6 +96,14 @@ export const CreateJob: React.FC = () => {
   };
 
   const onSubmit = async (data: CreateJobForm) => {
+    if (networkConfig.network === 'mainnet') {
+      const budgetNum = Number(data.budget);
+      const fee = budgetNum * 0.01;
+      const ok = window.confirm(
+        `You are on MAINNET. This will lock ${budgetNum} USDC plus ~${fee.toFixed(4)} USDC platform fee. Continue?`,
+      );
+      if (!ok) return;
+    }
     if (!publicKey) {
       alert('Please connect your wallet first');
       return;
