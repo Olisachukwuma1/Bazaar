@@ -18,6 +18,7 @@ import {
   Shield, FileText
 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { SKILL_CATEGORIES, getSkillColor } from '@/constants/skills';
 
 const ALL_SKILLS = [
   'python', 'javascript', 'typescript', 'rust', 'go', 'java', 'cpp',
