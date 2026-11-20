@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -22,11 +22,52 @@ export const Marketplace: React.FC = () => {
   const { publicKey, isConnected } = useWallet();
   const { getContractClient } = useStellar();
   const queryClient = useQueryClient();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
-  const [sortBy, setSortBy] = useState<'reputation' | 'price' | 'jobs' | 'recent'>('reputation');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [activeTab, setActiveTab] = useState<'agents' | 'jobs'>('agents');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // URL is the source of truth for filters, sort, view, tab and page.
+  const filters = useMemo(
+    () => decodeMarketplaceFilters(searchParams),
+    [searchParams],
+  );
+  const { search: searchQuery, skills: selectedSkills, sort: sortBy, view: viewMode, tab: activeTab, page } = filters;
+
+  // Debounce the search term so filtering only runs once typing settles.
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 250);
+
+  const updateFilters = useCallback(
+    (patch: Partial<MarketplaceFilters>) => {
+      setSearchParams(encodeMarketplaceFilters({ ...filters, ...patch }), {
+        replace: false,
+      });
+    },
+    [filters, setSearchParams],
+  );
+
+  const setSearchQuery = useCallback(
+    (value: string) => updateFilters({ search: value, page: 1 }),
+    [updateFilters],
+  );
+  const setSelectedSkills = useCallback(
+    (updater: (prev: string[]) => string[]) =>
+      updateFilters({ skills: updater(filters.skills), page: 1 }),
+    [filters.skills, updateFilters],
+  );
+  const setSortBy = useCallback(
+    (value: MarketplaceSort) => updateFilters({ sort: value, page: 1 }),
+    [updateFilters],
+  );
+  const setViewMode = useCallback(
+    (value: MarketplaceView) => updateFilters({ view: value }),
+    [updateFilters],
+  );
+  const setActiveTab = useCallback(
+    (value: MarketplaceTab) => updateFilters({ tab: value }),
+    [updateFilters],
+  );
+  const setPage = useCallback(
+    (value: number) => updateFilters({ page: value }),
+    [updateFilters],
+  );
 
   // Sentinel refs for infinite-scroll intersection observer
   const agentsSentinelRef = useRef<HTMLDivElement>(null);
@@ -148,7 +189,7 @@ export const Marketplace: React.FC = () => {
   }, [hasNextJobsPage, isFetchingNextJobsPage, fetchNextJobsPage]);
 
   // Filter agents
-  const filteredAgents = agents
+  const filteredAgents = useMemo(() => agents
     .filter(agent => {
       if (!agent.isActive) return false;
       if (searchQuery) {
@@ -174,10 +215,10 @@ export const Marketplace: React.FC = () => {
         case 'recent': return b.createdAt - a.createdAt;
         default: return 0;
       }
-    });
+    }), [agents, searchQuery, selectedSkills, sortBy]);
 
   // Filter jobs
-  const filteredJobs = jobs
+  const filteredJobs = useMemo(() => jobs
     .filter(job => {
       if (job.status !== 'Open') return false;
       if (searchQuery) {
@@ -195,7 +236,7 @@ export const Marketplace: React.FC = () => {
       }
       return true;
     })
-    .sort((a, b) => b.budget - a.budget);
+    .sort((a, b) => b.budget - a.budget), [jobs, searchQuery, selectedSkills]);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('en-US', {

@@ -1,0 +1,16 @@
+import { useEffect, useState } from 'react';
+
+/**
+ * Returns `value` after it has stopped changing for `delay` milliseconds.
+ * Used to keep expensive filtering work off the keystroke path.
+ */
+export function useDebouncedValue<T>(value: T, delay = 250): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+
+  return debounced;
+}
