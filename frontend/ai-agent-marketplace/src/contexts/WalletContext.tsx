@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import * as freighter from '@stellar/freighter-api';
 import { Horizon } from '@stellar/stellar-sdk';
+import { networkConfig } from '../config/network';
 
 export type NetworkType = string;
 
@@ -55,6 +56,21 @@ export const getComplianceLists = () => ({
   blockedAddresses: [...BLOCKED_ADDRESSES],
   blockedRegions: [...BLOCKED_REGIONS],
 });
+
+/** #157: Block signing when the wallet passphrase disagrees with the app build. */
+export class WalletNetworkMismatchError extends Error {
+  constructor(public readonly expected: string, public readonly actual: string) {
+    super(`Switch your wallet to ${expected.includes('Public') ? 'Mainnet' : 'Testnet'} (app expects this network).`);
+    this.name = 'WalletNetworkMismatchError';
+  }
+}
+
+export async function assertWalletNetworkMatchesApp(): Promise<void> {
+  const walletPassphrase = await freighter.getNetworkDetails().then((d) => d.networkPassphrase);
+  if (walletPassphrase && walletPassphrase !== networkConfig.networkPassphrase) {
+    throw new WalletNetworkMismatchError(networkConfig.networkPassphrase, walletPassphrase);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Terms of Service / Privacy Policy acceptance
@@ -249,6 +265,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const signTransaction = async (xdr: string, opts?: any): Promise<string> => {
+    await assertWalletNetworkMatchesApp();
     const result = await freighter.signTransaction(xdr, opts);
     return result.signedTxXdr;
   };
