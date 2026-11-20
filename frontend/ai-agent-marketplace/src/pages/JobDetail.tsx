@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -55,7 +55,6 @@ export const JobDetail: React.FC = () => {
   const [bidProposal, setBidProposal] = useState('');
   const [showDeliverableModal, setShowDeliverableModal] = useState(false);
   const [deliverableNote, setDeliverableNote] = useState('');
-  const [isActing, setIsActing] = useState(false);
 
   // Review form state
   const [reviewRating, setReviewRating] = useState(0);
