@@ -5,6 +5,7 @@ import { Button } from './ui/Button';
 import { Link } from 'react-router-dom';
 import { Networks } from '@stellar/stellar-sdk';
 import { getSep24InteractiveUrl, isFiatRampEnabled, type Sep24Kind } from '../lib/sep24';
+import { notify } from '../lib/notify';
 
 export const UserMenu: React.FC = () => {
   const { publicKey, disconnect, network, signTransaction } = useWallet();
@@ -34,7 +35,7 @@ export const UserMenu: React.FC = () => {
     } catch (err) {
       popup?.close();
       console.error(`SEP-24 ${kind} failed:`, err);
-      alert(err instanceof Error ? err.message : `Failed to start ${kind}.`);
+      notify.error(err instanceof Error ? err.message : `Failed to start ${kind}.`);
     }
   };
 

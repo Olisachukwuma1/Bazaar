@@ -3,6 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -25,6 +26,7 @@ import {
   isIpfsConfigured,
   type UploadProgress,
 } from '@/lib/ipfs';
+import { notify } from '@/lib/notify';
 import {
   AgentMetadataSchema,
   metadataUriSchema,
@@ -75,10 +77,14 @@ export const RegisterAgent: React.FC = () => {
   const navigate = useNavigate();
   const { publicKey, isConnected, signTransaction } = useWallet();
   const { getContractClient } = useStellar();
+  const queryClient = useQueryClient();
 
   // ── form state ──
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // #70: real transaction lifecycle state.
+  const [txStatus, setTxStatus] = useState<'idle' | 'pending' | 'confirmed' | 'failed'>('idle');
+  const [txError, setTxError] = useState<string | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<string[]>(['Languages', 'AI/ML']);
 
   // ── IPFS state ──
@@ -167,7 +173,7 @@ export const RegisterAgent: React.FC = () => {
 
   const handleUploadJson = async () => {
     if (!isIpfsConfigured()) {
-      alert('VITE_IPFS_API_KEY is not set. Add it to your .env.local file and restart the dev server.');
+      notify.error('VITE_IPFS_API_KEY is not set. Add it to your .env.local file and restart the dev server.');
       return;
     }
     const metadata = buildMetadataJson();
@@ -185,7 +191,7 @@ export const RegisterAgent: React.FC = () => {
 
   const handlePinningUpload = async () => {
     if (!isPinningConfigured()) {
-      alert(
+      notify.error(
         'VITE_PINNING_SERVICE_URL is not set. Add it to your .env.local file and restart the dev server.',
       );
       return;
@@ -209,7 +215,7 @@ export const RegisterAgent: React.FC = () => {
   const handleUploadFile = async () => {
     if (!selectedFile) return;
     if (!isIpfsConfigured()) {
-      alert('VITE_IPFS_API_KEY is not set. Add it to your .env.local file and restart the dev server.');
+      notify.error('VITE_IPFS_API_KEY is not set. Add it to your .env.local file and restart the dev server.');
       return;
     }
     setIpfsProgress({ percent: null, status: 'uploading' });
@@ -243,11 +249,11 @@ export const RegisterAgent: React.FC = () => {
 
   const onSubmit = async (data: RegisterAgentForm) => {
     if (!publicKey) {
-      alert('Please connect your wallet first');
+      notify.error('Please connect your wallet first');
       return;
     }
     if (selectedSkills.length === 0) {
-      alert('Please select at least one skill');
+      notify.error('Please select at least one skill');
       return;
     }
 
@@ -260,13 +266,15 @@ export const RegisterAgent: React.FC = () => {
     }
 
     setIsSubmitting(true);
+    setTxStatus('pending');
+    setTxError(null);
     try {
       const client = getContractClient();
       if (!client) {
         throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
       }
 
-      await client.registerAgent(publicKey, signTransaction, {
+      const agentId = await client.registerAgent(publicKey, signTransaction, {
         name: data.name,
         description: data.description,
         skills: data.skills,
@@ -274,11 +282,23 @@ export const RegisterAgent: React.FC = () => {
         metadataUri: finalMetadataUri,
       });
 
-      alert('Agent registered successfully!');
-      navigate('/dashboard');
+      setTxStatus('confirmed');
+
+      // Refresh agent queries so the new profile is visible immediately.
+      await queryClient.invalidateQueries({ queryKey: ['agents'] });
+      await queryClient.invalidateQueries({ queryKey: ['agent'] });
+      await queryClient.invalidateQueries({ queryKey: ['agentByOwner'] });
+
+      navigate(`/agents/${agentId}`);
     } catch (err) {
       console.error('Failed to register agent:', err);
-      alert(err instanceof Error ? err.message : 'Failed to register agent. Please try again.');
+      const message = err instanceof Error ? err.message : 'Failed to register agent. Please try again.';
+      setTxStatus('failed');
+      setTxError(
+        /already (has a registered agent|registered)|AgentAlreadyExists/i.test(message)
+          ? 'This wallet already has a registered agent. You can view or update your profile from the dashboard.'
+          : message,
+      );
     } finally {
       setIsSubmitting(false);
     }

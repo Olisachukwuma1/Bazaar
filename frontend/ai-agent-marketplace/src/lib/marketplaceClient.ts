@@ -302,8 +302,8 @@ export function contractErrorMessage(nameOrCode: string | number): string {
  * code is present.
  */
 export function describeSimulationError(error: string): string {
-  const match = /Error\(Contract, #(\d+)\)/.exec(error);
-  if (match) return contractErrorMessage(Number(match[1]));
+  const code = parseContractErrorCode(error);
+  if (code !== null) return describeContractError(error);
   return `Simulation failed: ${error}`;
 }
 
@@ -605,6 +605,57 @@ export class MarketplaceClient {
   async reclaimExpiredEscrow(publicKey: string, signTransaction: SignFn, jobId: number): Promise<void> {
     const raw = await this.send(
       'reclaim_expired_escrow', publicKey, signTransaction, addr(publicKey), u64(jobId),
+    );
+    unwrapResult(raw);
+  }
+
+  async cancelJob(publicKey: string, signTransaction: SignFn, jobId: number): Promise<void> {
+    const raw = await this.send(
+      'cancel_job', publicKey, signTransaction, addr(publicKey), u64(jobId),
+    );
+    unwrapResult(raw);
+  }
+
+  async withdrawBid(
+    publicKey: string,
+    signTransaction: SignFn,
+    jobId: number,
+    bidId: number,
+  ): Promise<void> {
+    const raw = await this.send(
+      'withdraw_bid', publicKey, signTransaction,
+      addr(publicKey), u64(jobId), u64(bidId),
+    );
+    unwrapResult(raw);
+  }
+
+  async raiseDispute(
+    publicKey: string,
+    signTransaction: SignFn,
+    jobId: number,
+    reason: string,
+    evidenceUri: string,
+  ): Promise<number> {
+    const raw = await this.send(
+      'raise_dispute', publicKey, signTransaction,
+      addr(publicKey), u64(jobId), str(reason), str(evidenceUri),
+    );
+    return toNum(unwrapResult(raw));
+  }
+
+  async leaveReview(
+    publicKey: string,
+    signTransaction: SignFn,
+    jobId: number,
+    rating: number,
+    comment: string,
+  ): Promise<void> {
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new Error(contractErrorMessage('InvalidRating'));
+    }
+    const raw = await this.send(
+      'leave_review', publicKey, signTransaction,
+      addr(publicKey), u64(jobId), u32(rating), str(comment),
     );
     unwrapResult(raw);
   }

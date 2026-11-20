@@ -18,7 +18,9 @@ import {
   ArrowLeft, Send, Wallet, X, Tag, ArrowUpDown,
   Shield, FileText
 } from 'lucide-react';
+import { notify } from '@/lib/notify';
 import { clsx } from 'clsx';
+import { SKILL_CATEGORIES, getSkillColor } from '@/constants/skills';
 
 const ALL_SKILLS = [
   'python', 'javascript', 'typescript', 'rust', 'go', 'java', 'cpp',
@@ -118,7 +120,7 @@ export const CreateJob: React.FC = () => {
       if (!ok) return;
     }
     if (!publicKey) {
-      alert('Please connect your wallet first');
+      notify.error('Please connect your wallet first');
       return;
     }
 
@@ -144,11 +146,13 @@ export const CreateJob: React.FC = () => {
           'Compliance restriction: this wallet address is blocked and cannot post jobs. ' +
           'If you believe this is an error, please contact support.';
         setComplianceError(message);
-        alert(message);
+        notify.error(message);
         return;
       }
 
-      await client.postJob(publicKey, signTransaction, {
+      // Builds, simulates, signs (Freighter) and submits the real `post_job`
+      // transaction, then waits for confirmation before returning the job id.
+      const jobId = await client.postJob(publicKey, signTransaction, {
         title: data.title,
         description: data.description,
         requiredSkills: data.requiredSkills,
@@ -157,10 +161,10 @@ export const CreateJob: React.FC = () => {
       });
 
       alert('Job posted successfully!');
-      navigate('/marketplace');
+      navigate(Number.isFinite(jobId) && jobId > 0 ? `/job/${jobId}` : '/marketplace');
     } catch (err) {
       console.error('Failed to post job:', err);
-      alert(err instanceof Error ? err.message : 'Failed to post job. Please try again.');
+      notify.error(err instanceof Error ? err.message : 'Failed to post job. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
