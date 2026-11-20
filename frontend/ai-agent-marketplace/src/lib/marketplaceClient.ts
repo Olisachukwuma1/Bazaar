@@ -302,8 +302,8 @@ export function contractErrorMessage(nameOrCode: string | number): string {
  * code is present.
  */
 export function describeSimulationError(error: string): string {
-  const match = /Error\(Contract, #(\d+)\)/.exec(error);
-  if (match) return contractErrorMessage(Number(match[1]));
+  const code = parseContractErrorCode(error);
+  if (code !== null) return describeContractError(error);
   return `Simulation failed: ${error}`;
 }
 

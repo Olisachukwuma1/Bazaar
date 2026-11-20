@@ -136,7 +136,9 @@ export const CreateJob: React.FC = () => {
         return;
       }
 
-      await client.postJob(publicKey, signTransaction, {
+      // Builds, simulates, signs (Freighter) and submits the real `post_job`
+      // transaction, then waits for confirmation before returning the job id.
+      const jobId = await client.postJob(publicKey, signTransaction, {
         title: data.title,
         description: data.description,
         requiredSkills: data.requiredSkills,
@@ -144,8 +146,8 @@ export const CreateJob: React.FC = () => {
         deadlineDays: data.deadlineDays,
       });
 
-      notify.success('Job posted successfully!');
-      navigate('/marketplace');
+      alert('Job posted successfully!');
+      navigate(Number.isFinite(jobId) && jobId > 0 ? `/job/${jobId}` : '/marketplace');
     } catch (err) {
       console.error('Failed to post job:', err);
       notify.error(err instanceof Error ? err.message : 'Failed to post job. Please try again.');
