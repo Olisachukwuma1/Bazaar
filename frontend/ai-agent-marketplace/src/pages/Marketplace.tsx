@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -13,6 +13,16 @@ import { QueryError } from '@/components/ui/QueryError';
 import { format } from 'date-fns/format';
 import { formatDistanceToNow } from 'date-fns/formatDistanceToNow';
 import { clsx } from 'clsx';
+import {
+  DEFAULT_MARKETPLACE_FILTERS,
+  decodeMarketplaceFilters,
+  encodeMarketplaceFilters,
+  hasActiveMarketplaceFilters,
+  type MarketplaceFilters,
+  type MarketplaceSort,
+  type MarketplaceTab,
+  type MarketplaceView,
+} from '@/lib/marketplaceFilters';
 
 const ALL_SKILLS = [
   'python', 'javascript', 'typescript', 'rust', 'go', 'java', 'cpp',
@@ -31,11 +41,49 @@ export const Marketplace: React.FC = () => {
   const { publicKey, isConnected } = useWallet();
   const { getContractClient } = useStellar();
   const queryClient = useQueryClient();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
-  const [sortBy, setSortBy] = useState<'reputation' | 'price' | 'jobs' | 'recent'>('reputation');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [activeTab, setActiveTab] = useState<'agents' | 'jobs'>('agents');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // URL is the source of truth for filters, sort, view, tab and page.
+  const filters = useMemo(
+    () => decodeMarketplaceFilters(searchParams),
+    [searchParams],
+  );
+  const { search: searchQuery, skills: selectedSkills, sort: sortBy, view: viewMode, tab: activeTab, page } = filters;
+
+  const updateFilters = useCallback(
+    (patch: Partial<MarketplaceFilters>) => {
+      setSearchParams(encodeMarketplaceFilters({ ...filters, ...patch }), {
+        replace: false,
+      });
+    },
+    [filters, setSearchParams],
+  );
+
+  const setSearchQuery = useCallback(
+    (value: string) => updateFilters({ search: value, page: 1 }),
+    [updateFilters],
+  );
+  const setSelectedSkills = useCallback(
+    (updater: (prev: string[]) => string[]) =>
+      updateFilters({ skills: updater(filters.skills), page: 1 }),
+    [filters.skills, updateFilters],
+  );
+  const setSortBy = useCallback(
+    (value: MarketplaceSort) => updateFilters({ sort: value, page: 1 }),
+    [updateFilters],
+  );
+  const setViewMode = useCallback(
+    (value: MarketplaceView) => updateFilters({ view: value }),
+    [updateFilters],
+  );
+  const setActiveTab = useCallback(
+    (value: MarketplaceTab) => updateFilters({ tab: value }),
+    [updateFilters],
+  );
+  const setPage = useCallback(
+    (value: number) => updateFilters({ page: value }),
+    [updateFilters],
+  );
 
   // Sentinel refs for infinite-scroll intersection observer
   const agentsSentinelRef = useRef<HTMLDivElement>(null);
