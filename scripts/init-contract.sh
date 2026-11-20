@@ -122,6 +122,21 @@ validate_positive "ESCROW_EXPIRY_DAYS" "$ESCROW_EXPIRY_DAYS"
 validate_reputation "MIN_AGENT_REPUTATION" "$MIN_AGENT_REPUTATION"
 validate_reputation "MIN_AGENT_REPUTATION_TO_BID" "$MIN_AGENT_REPUTATION_TO_BID"
 
+# #160: On mainnet, refuse non-canonical USDC token contracts.
+MAINNET_USDC="CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75"
+if [ "$NETWORK" = "mainnet" ]; then
+    if [ "$USDC_CONTRACT" != "$MAINNET_USDC" ]; then
+        echo -e "${RED}❌ Mainnet init requires canonical Circle USDC: $MAINNET_USDC${NC}"
+        exit 1
+    fi
+    echo -e "${YELLOW}🔎 Verifying USDC token metadata (decimals/symbol)...${NC}"
+    META=$(stellar contract invoke --id "$USDC_CONTRACT" --network mainnet --rpc-url "$RPC_URL" --network-passphrase "$NETWORK_PASSPHRASE" -- decimals 2>/dev/null || echo "")
+    if [ -n "$META" ] && [ "$META" != "7" ]; then
+        echo -e "${RED}❌ USDC decimals must be 7 on mainnet${NC}"
+        exit 1
+    fi
+fi
+
 # Initialize (signed by the admin source account so admin.require_auth() passes)
 echo -e "${YELLOW}⚙️  Calling initialize()...${NC}"
 stellar contract invoke \
