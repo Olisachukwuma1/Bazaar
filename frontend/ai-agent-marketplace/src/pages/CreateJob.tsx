@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { notify } from '@/lib/notify';
 import { clsx } from 'clsx';
+import { SKILL_CATEGORIES, getSkillColor } from '@/constants/skills';
 
 const ALL_SKILLS = [
   'python', 'javascript', 'typescript', 'rust', 'go', 'java', 'cpp',
