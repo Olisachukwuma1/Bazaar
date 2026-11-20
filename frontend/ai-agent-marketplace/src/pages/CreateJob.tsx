@@ -17,6 +17,7 @@ import {
   ArrowLeft, Send, Wallet, X, Tag, ArrowUpDown,
   Shield, FileText
 } from 'lucide-react';
+import { notify } from '@/lib/notify';
 import { clsx } from 'clsx';
 
 const ALL_SKILLS = [
@@ -105,7 +106,7 @@ export const CreateJob: React.FC = () => {
       if (!ok) return;
     }
     if (!publicKey) {
-      alert('Please connect your wallet first');
+      notify.error('Please connect your wallet first');
       return;
     }
 
@@ -131,7 +132,7 @@ export const CreateJob: React.FC = () => {
           'Compliance restriction: this wallet address is blocked and cannot post jobs. ' +
           'If you believe this is an error, please contact support.';
         setComplianceError(message);
-        alert(message);
+        notify.error(message);
         return;
       }
 
@@ -149,7 +150,7 @@ export const CreateJob: React.FC = () => {
       navigate(Number.isFinite(jobId) && jobId > 0 ? `/job/${jobId}` : '/marketplace');
     } catch (err) {
       console.error('Failed to post job:', err);
-      alert(err instanceof Error ? err.message : 'Failed to post job. Please try again.');
+      notify.error(err instanceof Error ? err.message : 'Failed to post job. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
