@@ -3126,3 +3126,18 @@ mod test;
 
 #[cfg(test)]
 mod budget_test;
+
+#[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
+mod negative_place_bid_test;
+
+#[cfg(test)]
+mod negative_withdraw_bid_test;
+
+#[cfg(test)]
+mod negative_accept_bid_test;
+
+#[cfg(test)]
+mod negative_submit_deliverable_test;
