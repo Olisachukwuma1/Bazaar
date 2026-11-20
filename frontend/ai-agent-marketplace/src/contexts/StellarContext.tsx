@@ -11,7 +11,8 @@ import {
   nativeToScVal,
   scValToNative,
   Keypair,
-  StrKey
+  StrKey,
+  Account,
 } from '@stellar/stellar-sdk';
 import {
   MarketplaceClient,
@@ -32,8 +33,11 @@ export interface StellarContextType {
   isConnected: boolean;
   connect: (config: ContractConfig) => Promise<void>;
   disconnect: () => void;
-  simulateTransaction: (tx: any) => Promise<any>;
-  sendTransaction: (tx: any, signFn: any) => Promise<any>;
+  simulateTransaction: (tx: TransactionBuilder) => Promise<SorobanRpc.Api.SimulateTransactionResponse>;
+  sendTransaction: (
+    tx: TransactionBuilder,
+    signFn: (tx: string) => Promise<string>,
+  ) => Promise<SorobanRpc.Api.SendTransactionResponse>;
   getContractData: (key: xdr.ScVal, durability?: 'persistent' | 'temporary') => Promise<xdr.ScVal | null>;
   invokeContract: (method: string, ...args: xdr.ScVal[]) => Promise<xdr.ScVal | null>;
   /**
@@ -117,7 +121,13 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!rpc || !config) throw new Error('Not connected');
     
     try {
-      const result: any = await (rpc as any).getContractData(config.contractId, key, durability as any);
+      const result = await rpc.getContractData(
+        config.contractId,
+        key,
+        durability === 'temporary'
+          ? SorobanRpc.Durability.Temporary
+          : SorobanRpc.Durability.Persistent,
+      );
       return result?.val ?? null;
     } catch (error) {
       if ((error as Error).message.includes('not found')) return null;
@@ -128,8 +138,8 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const invokeContract = useCallback(async (method: string, ...args: xdr.ScVal[]) => {
     if (!contract || !rpc || !config) throw new Error('Not connected');
     
-    const account = new (TransactionBuilder as any).Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0');
-    const tx = new (TransactionBuilder as any)(account, {
+    const account = new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0');
+    const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
       networkPassphrase: config.networkPassphrase,
     })
@@ -143,7 +153,7 @@ export const StellarProvider: React.FC<{ children: React.ReactNode }> = ({ child
       throw new Error(describeSimulationError(simResult.error));
     }
     
-    return (simResult as any).result?.retval ?? null;
+    return (simResult as SorobanRpc.Api.SimulateTransactionSuccessResponse).result?.retval ?? null;
   }, [contract, rpc, config]);
 
   // Build, sign and submit a real transaction (as opposed to `invokeContract`,
