@@ -61,7 +61,11 @@ pub struct Job {
     pub accepted_at: Option<u64>,
     pub completed_at: Option<u64>,
     pub deliverable_hash: Option<BytesN<32>>,
+    /// #140: Off-chain pointer for deliverable content (bounded length).
+    pub deliverable_uri: Option<String>,
     pub dispute_raised: bool,
+    /// #138: Number of client revision rounds on this job.
+    pub revision_count: u32,
 }
 
 #[contracttype]
@@ -257,6 +261,8 @@ pub struct Config {
     /// lets operators seed a starting reputation without blocking cold-start
     /// agents.
     pub starting_reputation: u32,
+    /// #142: Maximum concurrent in-progress jobs per agent (0 = unlimited).
+    pub max_active_jobs_per_agent: u32,
 }
 
 #[contracttype]
@@ -299,6 +305,8 @@ pub enum DataKey {
     Resolvers,
     /// #116: Monotonic counter used to round-robin disputes across resolvers.
     ResolverCounter,
+    /// #142: Active (in-progress) job count per agent owner.
+    ActiveJobs(Address),
 }
 
 #[contracttype]
@@ -393,6 +401,9 @@ pub enum Error {
     /// #111: Returned by `resolve_dispute` when a split percentage is greater
     /// than 100.
     InvalidSplit = 57,
+    TooManyBids = 58,
+    AgentNotPayable = 59,
+    MaxActiveJobsReached = 60,
 }
 
 /// #172: Minimum TTL (in ledgers) we keep on persistent records.  At ~5s per
@@ -427,6 +438,9 @@ pub const DEFAULT_RESOLUTION_DEADLINE_DAYS: u64 = 14;
 /// #115: Default percentage of the post-fee payout sent to the agent when the
 /// resolver times out (remainder refunded to the client).
 pub const DEFAULT_RESOLVER_TIMEOUT_AGENT_PCT: u32 = 50;
+pub const USDC_DECIMALS: u32 = 7;
+pub const DEFAULT_MAX_BIDS_PER_JOB: u32 = 50;
+pub const DEFAULT_MAX_ACTIVE_JOBS_PER_AGENT: u32 = 0;
 
 #[contract]
 pub struct AiAgentMarketplace;
@@ -504,6 +518,7 @@ impl AiAgentMarketplace {
             total_locked_escrow: 0,
             max_bids_per_job: DEFAULT_MAX_BIDS_PER_JOB,
             starting_reputation: 0,
+            max_active_jobs_per_agent: DEFAULT_MAX_ACTIVE_JOBS_PER_AGENT,
         };
 
         // #103 / #104: validate every field before persisting.
@@ -935,6 +950,8 @@ impl AiAgentMarketplace {
         required_skills: Vec<String>,
         budget: i128,
         deadline_days: u64,
+        invited_agents: Vec<Address>,
+        min_reputation: u32,
     ) -> Result<u64, Error> {
         client.require_auth();
         Self::ensure_not_paused(&env)?;
@@ -959,6 +976,10 @@ impl AiAgentMarketplace {
             return Err(Error::InvalidDeadline);
         }
 
+        if min_reputation > 100 {
+            return Err(Error::InvalidConfig);
+        }
+
         let job_id = Self::next_job_id(&env)?;
         let now = env.ledger().timestamp();
         let deadline = now + (deadline_days * 86400); // Convert days to seconds
@@ -978,7 +999,9 @@ impl AiAgentMarketplace {
             accepted_at: None,
             completed_at: None,
             deliverable_hash: None,
+            deliverable_uri: None,
             dispute_raised: false,
+            revision_count: 0,
         };
 
         env.storage().instance().set(&DataKey::Job(job_id), &job);
@@ -1091,6 +1114,16 @@ impl AiAgentMarketplace {
             return Err(Error::AgentInactive);
         }
 
+        // #136: invite-only jobs reject non-invited agents.
+        if !job.invited_agents.is_empty() && !job.invited_agents.contains(agent_owner.clone()) {
+            return Err(Error::AgentNotInvited);
+        }
+
+        // #137: per-job reputation floor (stricter than the global gate).
+        if agent.reputation < job.min_reputation {
+            return Err(Error::AgentReputationTooLow);
+        }
+
         // #119: cold-start exemption.  Agents that have never completed a job
         // are exempt from the minimum-reputation gate so they can earn their
         // first review.  Once they complete a job, the gate applies normally.
@@ -1177,6 +1210,97 @@ impl AiAgentMarketplace {
         Ok(bid_id)
     }
 
+    /// #134: Update a pending bid without withdrawing and re-bidding.
+    pub fn update_bid(
+        env: Env,
+        agent_owner: Address,
+        bid_id: u64,
+        amount: i128,
+        proposed_timeline_days: u64,
+        proposal: String,
+    ) -> Result<(), Error> {
+        agent_owner.require_auth();
+        Self::ensure_not_paused(&env)?;
+        Self::ensure_not_denylisted(&env, &agent_owner)?;
+
+        let mut bid = Self::get_bid(&env, bid_id)?;
+        if bid.agent != agent_owner {
+            return Err(Error::Unauthorized);
+        }
+        if bid.status != BidStatus::Pending {
+            return Err(Error::BidNotPending);
+        }
+
+        // Resolve the job via the bid index (first matching job in storage).
+        let job_id = Self::job_id_for_bid(&env, bid_id)?;
+        let job = Self::get_job(&env, job_id)?;
+
+        if job.status != JobStatus::Open {
+            return Err(Error::JobNotOpen);
+        }
+        if env.ledger().timestamp() > job.deadline {
+            return Err(Error::JobExpired);
+        }
+        if amount < job.budget / 2 {
+            return Err(Error::BidTooLow);
+        }
+        if amount > job.budget {
+            return Err(Error::InsufficientBidAmount);
+        }
+
+        let now = env.ledger().timestamp();
+        bid.amount = amount;
+        bid.proposed_timeline = now + (proposed_timeline_days * 86400);
+        bid.proposal = proposal;
+        bid.submitted_at = now;
+        env.storage().instance().set(&DataKey::Bid(bid_id), &bid);
+
+        env.events().publish(
+            (symbol_short!("bid_update"), job_id, agent_owner.clone()),
+            (bid_id, job_id, agent_owner, amount),
+        );
+
+        Ok(())
+    }
+
+    /// #135: Client explicitly rejects a pending bid.
+    pub fn reject_bid(
+        env: Env,
+        client: Address,
+        job_id: u64,
+        bid_id: u64,
+    ) -> Result<(), Error> {
+        client.require_auth();
+        Self::extend_instance_ttl(&env);
+
+        let job = Self::get_job(&env, job_id)?;
+        if job.client != client {
+            return Err(Error::Unauthorized);
+        }
+
+        let job_bids: Vec<u64> = env.storage().instance()
+            .get(&DataKey::BidsByJob(job_id))
+            .unwrap_or(Vec::new(&env));
+        if !job_bids.contains(&bid_id) {
+            return Err(Error::BidNotFound);
+        }
+
+        let mut bid = Self::get_bid(&env, bid_id)?;
+        if bid.status != BidStatus::Pending {
+            return Err(Error::BidNotPending);
+        }
+
+        bid.status = BidStatus::Rejected;
+        env.storage().instance().set(&DataKey::Bid(bid_id), &bid);
+
+        env.events().publish(
+            (symbol_short!("bid_reject"), job_id, client.clone()),
+            (bid_id, job_id, client),
+        );
+
+        Ok(())
+    }
+
     /// Withdraw a pending bid (agent only)
     pub fn withdraw_bid(
         env: Env,
@@ -1245,6 +1369,9 @@ impl AiAgentMarketplace {
         let mut bid = Self::get_bid(&env, bid_id)?;
 
         if bid.status != BidStatus::Pending {
+            if bid.status == BidStatus::Rejected {
+                return Err(Error::BidRejected);
+            }
             return Err(Error::BidNotPending);
         }
 
@@ -1260,6 +1387,16 @@ impl AiAgentMarketplace {
             .unwrap_or(Vec::new(&env));
         if !job_bids.contains(&bid_id) {
             return Err(Error::BidNotFound);
+        }
+
+        // #142: Cap concurrent active jobs per agent.
+        if config.max_active_jobs_per_agent > 0 {
+            let active: u32 = env.storage().instance()
+                .get(&DataKey::ActiveJobs(bid.agent.clone()))
+                .unwrap_or(0);
+            if active >= config.max_active_jobs_per_agent {
+                return Err(Error::MaxActiveJobsReached);
+            }
         }
 
         // Calculate platform fee
@@ -1332,6 +1469,8 @@ impl AiAgentMarketplace {
         agent_jobs.push_back(job_id);
         env.storage().instance().set(&DataKey::JobsByAgent(bid.agent.clone()), &agent_jobs);
 
+        Self::incr_active_jobs(&env, &bid.agent);
+
         // Update stats
         let mut stats = Self::get_platform_stats(&env)?;
         stats.total_volume += bid.amount;
@@ -1368,6 +1507,7 @@ impl AiAgentMarketplace {
         agent: Address,
         job_id: u64,
         deliverable_hash: BytesN<32>,
+        deliverable_uri: String,
     ) -> Result<(), Error> {
         agent.require_auth();
         Self::ensure_not_paused(&env)?;
@@ -1383,14 +1523,58 @@ impl AiAgentMarketplace {
             return Err(Error::JobNotInProgress);
         }
 
+        if deliverable_uri.len() as u32 > MAX_DELIVERABLE_URI_LEN {
+            return Err(Error::InputTooLong);
+        }
+
         job.deliverable_hash = Some(deliverable_hash);
+        job.deliverable_uri = Some(deliverable_uri.clone());
         job.status = JobStatus::Completed;
         job.completed_at = Some(env.ledger().timestamp());
         env.storage().instance().set(&DataKey::Job(job_id), &job);
 
         env.events().publish(
             (symbol_short!("deliver"), job_id, agent.clone()),
-            (job_id, agent, deliverable_hash),
+            (job_id, agent, deliverable_hash, deliverable_uri),
+        );
+
+        Ok(())
+    }
+
+    /// #138: Client requests revisions before approve/dispute.
+    pub fn request_changes(
+        env: Env,
+        client: Address,
+        job_id: u64,
+        notes_hash: BytesN<32>,
+    ) -> Result<(), Error> {
+        client.require_auth();
+        Self::ensure_not_paused(&env)?;
+        Self::extend_instance_ttl(&env);
+
+        let config = Self::get_config(&env)?;
+        let mut job = Self::get_job(&env, job_id)?;
+
+        if job.client != client {
+            return Err(Error::Unauthorized);
+        }
+        if job.status != JobStatus::Completed {
+            return Err(Error::JobNotCompleted);
+        }
+        if job.revision_count >= config.max_revisions {
+            return Err(Error::RevisionCapReached);
+        }
+
+        job.revision_count += 1;
+        job.status = JobStatus::InProgress;
+        job.completed_at = None;
+        job.deliverable_hash = None;
+        job.deliverable_uri = None;
+        env.storage().instance().set(&DataKey::Job(job_id), &job);
+
+        env.events().publish(
+            (symbol_short!("rev_req"), job_id, client.clone()),
+            (job_id, client, notes_hash, job.revision_count),
         );
 
         Ok(())
@@ -1467,6 +1651,60 @@ impl AiAgentMarketplace {
         );
 
         Ok(())
+    }
+
+    /// #141: Approve deliverable and transfer an optional tip (no extra platform fee).
+    pub fn approve_deliverable_with_tip(
+        env: Env,
+        client: Address,
+        job_id: u64,
+        tip: i128,
+    ) -> Result<(), Error> {
+        client.require_auth();
+        Self::extend_instance_ttl(&env);
+
+        if tip < 0 {
+            return Err(Error::InvalidBudget);
+        }
+
+        // Perform the standard approval payout first.
+        {
+            let env2 = env.clone();
+            Self::approve_deliverable(env2, client.clone(), job_id)?;
+        }
+
+        if tip > 0 {
+            let config = Self::get_config(&env)?;
+            let job = Self::get_job(&env, job_id)?;
+            let agent = job.assigned_agent.ok_or(Error::Unauthorized)?;
+            let usdc = TokenClient::new(&env, &config.usdc_token);
+            usdc.transfer(&client, &agent, &tip);
+            env.events().publish(
+                (symbol_short!("tip_paid"), job_id, client.clone()),
+                (job_id, agent, tip),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// #139: Permissionless escrow release when the client never reviewed in time.
+    pub fn release_if_unreviewed(env: Env, job_id: u64) -> Result<(), Error> {
+        Self::extend_instance_ttl(&env);
+        let config = Self::get_config(&env)?;
+        let job = Self::get_job(&env, job_id)?;
+
+        if job.status != JobStatus::Completed {
+            return Err(Error::JobNotCompleted);
+        }
+        let completed_at = job.completed_at.ok_or(Error::JobNotCompleted)?;
+        let release_at = completed_at + config.auto_release_days * 86_400;
+        if env.ledger().timestamp() < release_at {
+            return Err(Error::AutoReleaseNotDue);
+        }
+
+        // Re-use the client approval path (same fee treatment as manual approve).
+        Self::approve_deliverable(env, job.client.clone(), job_id)
     }
 
     /// Raise a dispute
@@ -2793,6 +3031,20 @@ impl AiAgentMarketplace {
     /// - Returns an empty Vec when `offset >= all.len()` or `limit == 0`.
     /// - Clamps the end index to the actual length so callers never need to
     ///   worry about out-of-bounds accesses.
+    /// Returns the job id that owns `bid_id` by scanning the on-chain index.
+    fn job_id_for_bid(env: &Env, bid_id: u64) -> Result<u64, Error> {
+        let job_counter: u64 = env.storage().instance().get(&DataKey::JobCounter).unwrap_or(0);
+        for job_id in 1..=job_counter {
+            let bids: Vec<u64> = env.storage().instance()
+                .get(&DataKey::BidsByJob(job_id))
+                .unwrap_or(Vec::new(env));
+            if bids.contains(&bid_id) {
+                return Ok(job_id);
+            }
+        }
+        Err(Error::BidNotFound)
+    }
+
     fn paginate(env: &Env, all: &Vec<u64>, offset: u64, limit: u64) -> Vec<u64> {
         let total = all.len() as u64;
         if limit == 0 || offset >= total {
@@ -2915,6 +3167,23 @@ impl AiAgentMarketplace {
     /// updates the platform's average completion time, and releases the
     /// locked-escrow accounting.  Callers must have already updated the escrow
     /// record before invoking this.
+    fn incr_active_jobs(env: &Env, agent: &Address) {
+        let count: u32 = env.storage().instance()
+            .get(&DataKey::ActiveJobs(agent.clone()))
+            .unwrap_or(0);
+        env.storage().instance().set(&DataKey::ActiveJobs(agent.clone()), &(count + 1));
+    }
+
+    fn decr_active_jobs(env: &Env, agent: &Address) {
+        let count: u32 = env.storage().instance()
+            .get(&DataKey::ActiveJobs(agent.clone()))
+            .unwrap_or(0);
+        env.storage().instance().set(
+            &DataKey::ActiveJobs(agent.clone()),
+            &count.saturating_sub(1),
+        );
+    }
+
     fn finalize_job_payout(
         env: &Env,
         job_id: u64,
@@ -2923,6 +3192,8 @@ impl AiAgentMarketplace {
         agent_amount: i128,
     ) -> Result<(), Error> {
         let now = env.ledger().timestamp();
+
+        Self::decr_active_jobs(env, agent_owner);
 
         // Update agent stats.
         let agent_id: u64 = env.storage().instance()
@@ -3126,3 +3397,18 @@ mod test;
 
 #[cfg(test)]
 mod budget_test;
+
+#[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
+mod negative_update_agent_test;
+
+#[cfg(test)]
+mod negative_verify_skill_test;
+
+#[cfg(test)]
+mod negative_post_job_test;
+
+#[cfg(test)]
+mod negative_cancel_job_test;
