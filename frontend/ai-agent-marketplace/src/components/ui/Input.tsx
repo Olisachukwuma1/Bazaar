@@ -7,9 +7,12 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, className, id: providedId, ...props }, ref) => {
-    const inputId = providedId || label?.toLowerCase().replace(/\s+/g, '-');
-    
+  ({ label, error, className, id: providedId, 'aria-describedby': describedBy, ...props }, ref) => {
+    const generatedId = React.useId();
+    const inputId = providedId || label?.toLowerCase().replace(/\s+/g, '-') || generatedId;
+    const errorId = `${inputId}-error`;
+    const describedByIds = [describedBy, error ? errorId : undefined].filter(Boolean).join(' ') || undefined;
+
     return (
       <div className="space-y-1.5">
         {label && (
@@ -25,12 +28,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             error && 'border-destructive focus-visible:ring-destructive',
             className
           )}
-          aria-invalid={error ? 'true' : 'false'}
-          aria-describedby={error ? `${inputId}-error` : undefined}
+          aria-invalid={error ? 'true' : undefined}
+          aria-describedby={describedByIds}
           {...props}
         />
         {error && (
-          <p id={`${inputId}-error`} className="text-sm text-destructive" role="alert">
+          <p id={errorId} className="text-sm text-destructive" role="alert">
             {error}
           </p>
         )}
