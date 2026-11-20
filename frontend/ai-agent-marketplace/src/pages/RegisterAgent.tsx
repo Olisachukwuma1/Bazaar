@@ -3,6 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -75,10 +76,14 @@ export const RegisterAgent: React.FC = () => {
   const navigate = useNavigate();
   const { publicKey, isConnected, signTransaction } = useWallet();
   const { getContractClient } = useStellar();
+  const queryClient = useQueryClient();
 
   // ── form state ──
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // #70: real transaction lifecycle state.
+  const [txStatus, setTxStatus] = useState<'idle' | 'pending' | 'confirmed' | 'failed'>('idle');
+  const [txError, setTxError] = useState<string | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<string[]>(['Languages', 'AI/ML']);
 
   // ── IPFS state ──
@@ -260,13 +265,15 @@ export const RegisterAgent: React.FC = () => {
     }
 
     setIsSubmitting(true);
+    setTxStatus('pending');
+    setTxError(null);
     try {
       const client = getContractClient();
       if (!client) {
         throw new Error('Not connected to the marketplace contract. Configure it in Settings.');
       }
 
-      await client.registerAgent(publicKey, signTransaction, {
+      const agentId = await client.registerAgent(publicKey, signTransaction, {
         name: data.name,
         description: data.description,
         skills: data.skills,
@@ -274,11 +281,23 @@ export const RegisterAgent: React.FC = () => {
         metadataUri: finalMetadataUri,
       });
 
-      alert('Agent registered successfully!');
-      navigate('/dashboard');
+      setTxStatus('confirmed');
+
+      // Refresh agent queries so the new profile is visible immediately.
+      await queryClient.invalidateQueries({ queryKey: ['agents'] });
+      await queryClient.invalidateQueries({ queryKey: ['agent'] });
+      await queryClient.invalidateQueries({ queryKey: ['agentByOwner'] });
+
+      navigate(`/agents/${agentId}`);
     } catch (err) {
       console.error('Failed to register agent:', err);
-      alert(err instanceof Error ? err.message : 'Failed to register agent. Please try again.');
+      const message = err instanceof Error ? err.message : 'Failed to register agent. Please try again.';
+      setTxStatus('failed');
+      setTxError(
+        /already (has a registered agent|registered)|AgentAlreadyExists/i.test(message)
+          ? 'This wallet already has a registered agent. You can view or update your profile from the dashboard.'
+          : message,
+      );
     } finally {
       setIsSubmitting(false);
     }
