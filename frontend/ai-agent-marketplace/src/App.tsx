@@ -1,6 +1,9 @@
 import React, { Suspense, lazy, useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { RouteErrorBoundary } from './components/RouteErrorBoundary';
+import { EnvErrorScreen } from './components/EnvErrorScreen';
+import { tryLoadEnvConfig } from './config/env';
 
 const Marketplace = lazy(() => import('./pages/Marketplace').then((m) => ({ default: m.Marketplace })));
 const AgentProfile = lazy(() => import('./pages/AgentProfile').then((m) => ({ default: m.AgentProfile })));
@@ -12,11 +15,19 @@ const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m
 const Landing = lazy(() => import('./pages/Landing').then((m) => ({ default: m.Landing })));
 const Terms = lazy(() => import('./pages/Terms').then((m) => ({ default: m.Terms })));
 const Privacy = lazy(() => import('./pages/Privacy').then((m) => ({ default: m.Privacy })));
+const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 
 const Loading = () => (
   <div className="flex h-screen items-center justify-center">
     <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent"></div>
   </div>
+);
+
+/** Wraps a lazy route in its own error boundary and suspense fallback. */
+const RouteShell: React.FC<{ name: string; children: React.ReactNode }> = ({ name, children }) => (
+  <RouteErrorBoundary routeName={name}>
+    <Suspense fallback={<Loading />}>{children}</Suspense>
+  </RouteErrorBoundary>
 );
 
 function App() {
@@ -33,62 +44,70 @@ function App() {
     }
   }, []);
 
+  // Fail fast with a readable screen when the build-time env config is invalid.
+  const { error: envError } = tryLoadEnvConfig();
+  if (envError) return <EnvErrorScreen error={envError} />;
+
   return (
     <div className="min-h-screen bg-background">
       <Routes>
         <Route path="/" element={
-          <Suspense fallback={<Loading />}>
+          <RouteShell name="/">
             <Landing />
-          </Suspense>
+          </RouteShell>
         } />
         <Route element={<Layout />}>
           <Route path="/marketplace" element={
-            <Suspense fallback={<Loading />}>
+            <RouteShell name="/marketplace">
               <Marketplace />
-            </Suspense>
+            </RouteShell>
           } />
           <Route path="/agent/:agentId" element={
-            <Suspense fallback={<Loading />}>
+            <RouteShell name="/agent/:agentId">
               <AgentProfile />
-            </Suspense>
+            </RouteShell>
           } />
           <Route path="/job/:jobId" element={
-            <Suspense fallback={<Loading />}>
+            <RouteShell name="/job/:jobId">
               <JobDetail />
-            </Suspense>
+            </RouteShell>
           } />
           <Route path="/dashboard" element={
-            <Suspense fallback={<Loading />}>
+            <RouteShell name="/dashboard">
               <Dashboard />
-            </Suspense>
+            </RouteShell>
           } />
           <Route path="/create-job" element={
-            <Suspense fallback={<Loading />}>
+            <RouteShell name="/create-job">
               <CreateJob />
-            </Suspense>
+            </RouteShell>
           } />
           <Route path="/register-agent" element={
-            <Suspense fallback={<Loading />}>
+            <RouteShell name="/register-agent">
               <RegisterAgent />
-            </Suspense>
+            </RouteShell>
           } />
           <Route path="/settings" element={
-            <Suspense fallback={<Loading />}>
+            <RouteShell name="/settings">
               <Settings />
-            </Suspense>
+            </RouteShell>
           } />
           <Route path="/terms" element={
-            <Suspense fallback={<Loading />}>
+            <RouteShell name="/terms">
               <Terms />
-            </Suspense>
+            </RouteShell>
           } />
           <Route path="/privacy" element={
-            <Suspense fallback={<Loading />}>
+            <RouteShell name="/privacy">
               <Privacy />
-            </Suspense>
+            </RouteShell>
+          } />
+          <Route path="*" element={
+            <RouteShell name="404">
+              <NotFound />
+            </RouteShell>
           } />
         </Route>
-        <Route path="*" element={<Navigate to="/marketplace" replace />} />
       </Routes>
     </div>
   );
