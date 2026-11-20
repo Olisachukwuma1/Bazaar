@@ -219,6 +219,8 @@ pub struct Config {
     pub max_job_deadline_days: u64,
     pub dispute_window_days: u64,
     pub platform_fee_recipient: Address,
+    /// #163: Address that receives platform fees (defaults to admin at init).
+    pub treasury: Address,
     pub dispute_resolver: Address, // DAO or multisig
     pub min_agent_reputation_to_bid: u32,
     pub platform_fee_bps_dispute: u32, // Higher fee for disputes
@@ -427,6 +429,10 @@ pub const DEFAULT_RESOLUTION_DEADLINE_DAYS: u64 = 14;
 /// #115: Default percentage of the post-fee payout sent to the agent when the
 /// resolver times out (remainder refunded to the client).
 pub const DEFAULT_RESOLVER_TIMEOUT_AGENT_PCT: u32 = 50;
+/// #162: Hard ceiling for admin fee updates (500 bps = 5%).
+pub const MAX_PLATFORM_FEE_BPS: u32 = 500;
+pub const USDC_DECIMALS: u32 = 7;
+pub const DEFAULT_MAX_BIDS_PER_JOB: u32 = 50;
 
 #[contract]
 pub struct AiAgentMarketplace;
@@ -488,6 +494,7 @@ impl AiAgentMarketplace {
             max_job_deadline_days,
             dispute_window_days,
             platform_fee_recipient: platform_fee_recipient.clone(),
+            treasury: platform_fee_recipient.clone(),
             dispute_resolver: dispute_resolver.clone(),
             min_agent_reputation_to_bid,
             platform_fee_bps_dispute,
@@ -1350,7 +1357,7 @@ impl AiAgentMarketplace {
         // pulling bid+fee in and pushing the fee back out.
         let usdc_client = TokenClient::new(&env, &config.usdc_token);
         if platform_fee > 0 {
-            usdc_client.transfer(&client, &config.platform_fee_recipient, &platform_fee);
+            usdc_client.transfer(&client, &config.treasury, &platform_fee);
         }
         usdc_client.transfer(&client, &env.current_contract_address(), &bid.amount);
 
@@ -1678,7 +1685,7 @@ impl AiAgentMarketplace {
         if dispute_fee > 0 {
             usdc_client.transfer(
                 &env.current_contract_address(),
-                &config.platform_fee_recipient,
+                &config.treasury,
                 &dispute_fee,
             );
         }
@@ -2081,7 +2088,7 @@ impl AiAgentMarketplace {
         if dispute_fee > 0 {
             usdc_client.transfer(
                 &env.current_contract_address(),
-                &config.platform_fee_recipient,
+                &config.treasury,
                 &dispute_fee,
             );
         }
@@ -2170,7 +2177,7 @@ impl AiAgentMarketplace {
         if dispute_fee > 0 {
             usdc_client.transfer(
                 &env.current_contract_address(),
-                &config.platform_fee_recipient,
+                &config.treasury,
                 &dispute_fee,
             );
         }
@@ -2609,6 +2616,9 @@ impl AiAgentMarketplace {
         // #126: emit one `config_upd` event per changed field, carrying
         // `(field_symbol, old_value, new_value)` so indexers need not refetch.
         if let Some(fee) = platform_fee_bps {
+            if fee > MAX_PLATFORM_FEE_BPS {
+                return Err(Error::InvalidConfig);
+            }
             if fee != config.platform_fee_bps {
                 env.events().publish(
                     (symbol_short!("config_upd"), symbol_short!("fee_bps")),
@@ -2746,6 +2756,25 @@ impl AiAgentMarketplace {
         Ok(())
     }
 
+    /// #163: Admin updates the treasury address that receives fees.
+    pub fn set_treasury(env: Env, admin: Address, treasury: Address) -> Result<(), Error> {
+        admin.require_auth();
+        treasury.require_auth();
+        let mut config = Self::get_config(&env)?;
+        if config.admin != admin {
+            return Err(Error::Unauthorized);
+        }
+        if treasury != config.treasury {
+            env.events().publish(
+                (symbol_short!("treasury"), symbol_short!("updated")),
+                (config.treasury.clone(), treasury.clone()),
+            );
+        }
+        config.treasury = treasury;
+        env.storage().instance().set(&DataKey::Config, &config);
+        Ok(())
+    }
+
     /// Admin: Add skill verifier
     pub fn add_skill_verifier(env: Env, admin: Address, verifier: Address) -> Result<(), Error> {
         admin.require_auth();
@@ -2838,7 +2867,7 @@ impl AiAgentMarketplace {
         if config.escrow_expiry_days == 0 {
             return Err(Error::InvalidConfig);
         }
-        if config.platform_fee_bps > 10000 {
+        if config.platform_fee_bps > MAX_PLATFORM_FEE_BPS {
             return Err(Error::InvalidConfig);
         }
         if config.platform_fee_bps_dispute > 10000 {
@@ -3126,3 +3155,6 @@ mod test;
 
 #[cfg(test)]
 mod budget_test;
+
+#[cfg(test)]
+mod treasury_test;
