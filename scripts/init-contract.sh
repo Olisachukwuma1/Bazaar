@@ -2,9 +2,9 @@
 # Initialize the AI Agent Marketplace contract
 # Usage: ./scripts/init-contract.sh [testnet|mainnet|futurenet]
 
-set -e
+set -euo pipefail
 
-NETWORK=${1:-testnet}
+NETWORK="${1:-testnet}"
 CONTRACT_ALIAS="ai-agent-marketplace"
 
 # Colors
@@ -12,6 +12,12 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
+
+# Check prerequisites
+if ! command -v stellar &> /dev/null; then
+    echo -e "${RED}❌ Required command 'stellar' not found. Install the Stellar CLI first.${NC}"
+    exit 1
+fi
 
 # Load contract ID
 CONTRACT_FILE=".contract-id-$NETWORK"
@@ -25,7 +31,7 @@ CONTRACT_ID=$(cat "$CONTRACT_FILE")
 echo -e "${YELLOW}🔧 Initializing contract $CONTRACT_ID on $NETWORK...${NC}"
 
 # Network-specific config
-case $NETWORK in
+case "$NETWORK" in
     testnet)
         RPC_URL="https://soroban-testnet.stellar.org"
         NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
@@ -52,19 +58,19 @@ esac
 # by the admin's source account (ADMIN_SOURCE). Because initialize must be authorized by
 # the admin, deploy + initialize should be run atomically (e.g. via deploy-contract.sh
 # or a single script) to avoid a front-runner initializing with their own admin.
-if [ -n "$ADMIN_ADDRESS" ]; then
+if [ -n "${ADMIN_ADDRESS:-}" ]; then
     ADMIN="$ADMIN_ADDRESS"
-    ADMIN_SOURCE=${ADMIN_SOURCE:-deployer}
+    ADMIN_SOURCE="${ADMIN_SOURCE:-deployer}"
     echo -e "${YELLOW}👤 Using admin from ADMIN_ADDRESS: $ADMIN${NC}"
     echo -e "${YELLOW}🔑 Signing initialize() with source account: $ADMIN_SOURCE${NC}"
 else
-    ADMIN_SOURCE=${ADMIN_SOURCE:-deployer}
+    ADMIN_SOURCE="${ADMIN_SOURCE:-deployer}"
     ADMIN=$(stellar keys address "$ADMIN_SOURCE")
     echo -e "${YELLOW}👤 Using key '$ADMIN_SOURCE' as admin: $ADMIN${NC}"
 fi
 
 # Conservative caps: tighter on mainnet, looser on test networks
-case $NETWORK in
+case "$NETWORK" in
     mainnet)
         PLATFORM_FEE_BPS=100
         MIN_JOB_BUDGET=10000000
@@ -90,7 +96,7 @@ MIN_AGENT_REPUTATION=0
 MIN_AGENT_REPUTATION_TO_BID=0
 
 validate_positive() {
-    local name=$1 value=$2
+    local name="$1" value="$2"
     if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -le 0 ]; then
         echo -e "${RED}❌ $name must be a positive integer (got: $value)${NC}"
         exit 1
@@ -98,7 +104,7 @@ validate_positive() {
 }
 
 validate_bps() {
-    local name=$1 value=$2
+    local name="$1" value="$2"
     if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -gt 10000 ]; then
         echo -e "${RED}❌ $name must be an integer in 0..=10000 (got: $value)${NC}"
         exit 1
@@ -106,7 +112,7 @@ validate_bps() {
 }
 
 validate_reputation() {
-    local name=$1 value=$2
+    local name="$1" value="$2"
     if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -gt 100 ]; then
         echo -e "${RED}❌ $name must be an integer in 0..=100 (got: $value)${NC}"
         exit 1

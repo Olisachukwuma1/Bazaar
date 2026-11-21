@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 # Data Seeding Script for AI Agent Marketplace
 # Usage: ./scripts/seed-data.sh [testnet|futurenet|standalone]
 
-NETWORK=${1:-testnet}
+NETWORK="${1:-testnet}"
 echo "🌱 Seeding data for network: $NETWORK..."
+
+# Check prerequisites
+if ! command -v stellar &> /dev/null; then
+    echo "❌ Required command 'stellar' not found. Install the Stellar CLI first."
+    exit 1
+fi
 
 if [ ! -f ".contract-id-$NETWORK" ]; then
     echo "❌ Contract ID file .contract-id-$NETWORK not found. Run ./scripts/init-contract.sh $NETWORK first."

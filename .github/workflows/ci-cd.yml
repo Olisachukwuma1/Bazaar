@@ -26,6 +26,17 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # ========== SHELL SCRIPTS ==========
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+      - name: Run ShellCheck
+        run: shellcheck scripts/deploy-contract.sh scripts/deploy-frontend.sh scripts/init-contract.sh scripts/seed-data.sh
+
   # ========== SMART CONTRACT ==========
   contract-check:
     name: Contract Check
