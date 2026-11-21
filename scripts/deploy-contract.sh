@@ -1,7 +1,7 @@
 #!/bin/bash
 # deploy-contract.sh - Deploy AI Agent Marketplace contract to Stellar
 
-set -e
+set -euo pipefail
 
 # Colors
 GREEN='\033[0;32m'
@@ -19,22 +19,22 @@ for arg in "$@"; do
         ARGS+=("$arg")
     fi
 done
-set -- "${ARGS[@]}"
+set -- "${ARGS[@]+"${ARGS[@]}"}"
 
 # Configuration
 MODE="deploy"
-if [ "$1" = "upgrade" ] || [ "$1" = "--upgrade" ]; then
+if [ "${1:-}" = "upgrade" ] || [ "${1:-}" = "--upgrade" ]; then
     MODE="upgrade"
     shift
 fi
-NETWORK=${1:-testnet}
-SOURCE_ACCOUNT=${2:-deployer}
+NETWORK="${1:-testnet}"
+SOURCE_ACCOUNT="${2:-deployer}"
 CONTRACT_ALIAS="ai-agent-marketplace"
 WASM_PATH="contracts/ai-agent-marketplace/target/wasm32-unknown-unknown/release/ai_agent_marketplace.wasm"
 # Source account used for upgrades (multisig admin)
-ADMIN_SOURCE=${ADMIN_SOURCE:-admin-multisig}
+ADMIN_SOURCE="${ADMIN_SOURCE:-admin-multisig}"
 # SHA-256 of the CI-built WASM artifact (required on mainnet)
-EXPECTED_WASM_HASH=${EXPECTED_WASM_HASH:-}
+EXPECTED_WASM_HASH="${EXPECTED_WASM_HASH:-}"
 
 # Save a log of this deployment
 LOG_DIR="deployments"
@@ -69,8 +69,8 @@ fi
 
 # Check prerequisites
 check_command() {
-    if ! command -v $1 &> /dev/null; then
-        echo -e "${RED}❌ $1 not found. Please install it first.${NC}"
+    if ! command -v "$1" &> /dev/null; then
+        echo -e "${RED}❌ Required command '$1' not found. Please install it first.${NC}"
         exit 1
     fi
 }
@@ -97,7 +97,7 @@ cd ../..
 SIZE=$(wc -c < "$WASM_PATH")
 echo -e "${GREEN}✅ WASM size: $((SIZE / 1024)) KB${NC}"
 
-if [ $SIZE -gt 1000000 ]; then
+if [ "$SIZE" -gt 1000000 ]; then
     echo -e "${YELLOW}⚠️  Warning: WASM > 1MB, may exceed deployment limits${NC}"
 fi
 

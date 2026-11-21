@@ -1,9 +1,9 @@
 #!/bin/bash
 # deploy-frontend.sh - Deploy frontend to Vercel/Netlify
 
-set -e
+set -euo pipefail
 
-ENVIRONMENT=${1:-preview}
+ENVIRONMENT="${1:-preview}"
 PROJECT_DIR="frontend/ai-agent-marketplace"
 
 # Colors
@@ -22,7 +22,7 @@ cd "$PROJECT_DIR"
 if [ "$ENVIRONMENT" = "production" ]; then
     REQUIRED_VARS=("VITE_CONTRACT_ID" "VITE_RPC_URL" "VITE_NETWORK_PASSPHRASE" "VITE_USDC_CONTRACT_ID")
     for var in "${REQUIRED_VARS[@]}"; do
-        if [ -z "${!var}" ]; then
+        if [ -z "${!var:-}" ]; then
             echo -e "${RED}❌ Missing required env var: $var${NC}"
             exit 1
         fi
@@ -47,7 +47,7 @@ if command -v vercel &> /dev/null; then
     fi
 elif command -v netlify &> /dev/null; then
     echo -e "${YELLOW}🚀 Deploying to Netlify...${NC}"
-    if [ "$ENVIRONMENT" = "production" ]]; then
+    if [ "$ENVIRONMENT" = "production" ]; then
         netlify deploy --prod --dir=dist
     else
         netlify deploy --dir=dist
