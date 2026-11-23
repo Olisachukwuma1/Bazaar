@@ -66,6 +66,21 @@ export class WalletNetworkMismatchError extends Error {
   }
 }
 
+/** Friendly name for a Stellar network passphrase; falls back to the raw value. */
+export const networkLabelForPassphrase = (passphrase: string): string => {
+  if (passphrase.includes('Public Global')) return 'Mainnet';
+  if (passphrase.includes('Test SDF')) return 'Testnet';
+  return passphrase;
+};
+
+/** Describes a wallet whose network differs from the one this build targets. */
+export interface NetworkMismatch {
+  expected: string;
+  actual: string;
+  expectedLabel: string;
+  actualLabel: string;
+}
+
 export async function assertWalletNetworkMatchesApp(): Promise<void> {
   const walletPassphrase = await freighter.getNetworkDetails().then((d) => d.networkPassphrase);
   if (walletPassphrase && walletPassphrase !== networkConfig.networkPassphrase) {
@@ -166,6 +181,11 @@ interface WalletContextType extends WalletState {
   switchNetwork: (network: string) => Promise<void>;
   refreshBalance: () => Promise<void>;
   isFreighterInstalled: boolean;
+  /**
+   * Non-null while the connected Freighter network differs from
+   * `networkConfig.networkPassphrase`. Mutations must be disabled while set.
+   */
+  networkMismatch: NetworkMismatch | null;
   /** Compliance helpers usable before posting or bidding */
   isAddressBlocked: (address: string | null | undefined) => boolean;
   isRegionBlocked: (region: string | null | undefined) => boolean;
@@ -299,6 +319,47 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [isConnectedNow, currentNetwork, clearUserScopedQueries]);
 
+  // Track which network Freighter is on so a mismatch with the app build is
+  // shown up front instead of surfacing as an opaque signing failure. Freighter
+  // has no reliable push event, so poll while connected and on window focus.
+  const [walletPassphrase, setWalletPassphrase] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isConnectedNow) {
+      setWalletPassphrase(null);
+      return;
+    }
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const details = await freighter.getNetworkDetails();
+        if (!cancelled) setWalletPassphrase(details?.networkPassphrase || null);
+      } catch {
+        // Wallet locked or unavailable; keep the last known value and retry.
+      }
+    };
+
+    check();
+    const id = window.setInterval(check, WALLET_POLL_INTERVAL_MS);
+    window.addEventListener('focus', check);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      window.removeEventListener('focus', check);
+    };
+  }, [isConnectedNow]);
+
+  const networkMismatch: NetworkMismatch | null =
+    isConnectedNow && walletPassphrase && walletPassphrase !== networkConfig.networkPassphrase
+      ? {
+          expected: networkConfig.networkPassphrase,
+          actual: walletPassphrase,
+          expectedLabel: networkLabelForPassphrase(networkConfig.networkPassphrase),
+          actualLabel: networkLabelForPassphrase(walletPassphrase),
+        }
+      : null;
+
   const connect = async () => {
     setState((prev) => ({ ...prev, isConnecting: true }));
     try {
@@ -383,6 +444,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         switchNetwork,
         refreshBalance,
         isFreighterInstalled,
+        networkMismatch,
         isAddressBlocked,
         isRegionBlocked,
       }}
