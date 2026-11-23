@@ -13,6 +13,6 @@ fn place_bid_job_not_open() {
     m.register_agent(&agent, &String::from_str(&e, "A"), &String::from_str(&e, "d"), &Vec::from_array(&e, [String::from_str(&e, "nlp")]), &50_000_000, &String::from_str(&e, "ipfs://a")).unwrap();
     let job = m.post_job(&client, &String::from_str(&e, "t"), &String::from_str(&e, "d"), &Vec::from_array(&e, [String::from_str(&e, "nlp")]), &10_000_000, &7).unwrap();
     m.cancel_job(&client, &job).unwrap();
-    let r = m.try_place_bid(&agent, &job, &8_000_000, &5, &String::from_str(&e, "p"));
+    let r = m.try_place_bid(&agent, &job, &8_000_000, &5, &String::from_str(&e, "p"), &0);
     assert_eq!(r, Err(Ok(Error::JobNotOpen)));
 }

@@ -89,6 +89,8 @@ pub struct Bid {
     pub proposal: String,
     pub submitted_at: u64,
     pub status: BidStatus,
+    /// #133: Timestamp after which the bid can no longer be accepted.
+    pub valid_until: u64,
 }
 
 #[contracttype]
@@ -265,6 +267,10 @@ pub struct Config {
     pub starting_reputation: u32,
     /// #142: Maximum concurrent in-progress jobs per agent (0 = unlimited).
     pub max_active_jobs_per_agent: u32,
+    /// #133: Validity, in days, given to a bid placed without a `valid_until`.
+    pub default_bid_validity_days: u64,
+    /// #133: Maximum validity, in days, a bid may be placed with.
+    pub max_bid_validity_days: u64,
 }
 
 #[contracttype]
@@ -406,6 +412,8 @@ pub enum Error {
     TooManyBids = 58,
     AgentNotPayable = 59,
     MaxActiveJobsReached = 60,
+    /// #133: Returned by `accept_bid` when the bid's `valid_until` has passed.
+    BidExpired = 61,
 }
 
 /// #172: Minimum TTL (in ledgers) we keep on persistent records.  At ~5s per
@@ -443,6 +451,10 @@ pub const DEFAULT_RESOLVER_TIMEOUT_AGENT_PCT: u32 = 50;
 pub const USDC_DECIMALS: u32 = 7;
 pub const DEFAULT_MAX_BIDS_PER_JOB: u32 = 50;
 pub const DEFAULT_MAX_ACTIVE_JOBS_PER_AGENT: u32 = 0;
+/// #133: Default validity of a bid placed without a `valid_until`.
+pub const DEFAULT_BID_VALIDITY_DAYS: u64 = 7;
+/// #133: Default upper bound on a bid's validity.
+pub const DEFAULT_MAX_BID_VALIDITY_DAYS: u64 = 30;
 
 #[contract]
 pub struct AiAgentMarketplace;
@@ -522,6 +534,8 @@ impl AiAgentMarketplace {
             max_bids_per_job: DEFAULT_MAX_BIDS_PER_JOB,
             starting_reputation: 0,
             max_active_jobs_per_agent: DEFAULT_MAX_ACTIVE_JOBS_PER_AGENT,
+            default_bid_validity_days: DEFAULT_BID_VALIDITY_DAYS,
+            max_bid_validity_days: DEFAULT_MAX_BID_VALIDITY_DAYS,
         };
 
         // #103 / #104: validate every field before persisting.
@@ -1079,6 +1093,10 @@ impl AiAgentMarketplace {
     }
 
     /// Place a bid on a job
+    ///
+    /// #133: `valid_until` is the timestamp after which the bid can no longer
+    /// be accepted.  Pass 0 to use `config.default_bid_validity_days`.  It must
+    /// be in the future and at most `config.max_bid_validity_days` away.
     pub fn place_bid(
         env: Env,
         agent_owner: Address,
@@ -1086,6 +1104,7 @@ impl AiAgentMarketplace {
         amount: i128,
         proposed_timeline_days: u64,
         proposal: String,
+        valid_until: u64,
     ) -> Result<u64, Error> {
         agent_owner.require_auth();
         Self::ensure_not_paused(&env)?;
@@ -1179,8 +1198,19 @@ impl AiAgentMarketplace {
             return Err(Error::InsufficientBidAmount);
         }
 
-        let bid_id = Self::next_bid_id(&env)?;
         let now = env.ledger().timestamp();
+
+        // #133: bound the bid's validity window.
+        let valid_until = if valid_until == 0 {
+            now + (config.default_bid_validity_days * 86400)
+        } else {
+            valid_until
+        };
+        if valid_until <= now || valid_until > now + (config.max_bid_validity_days * 86400) {
+            return Err(Error::InvalidDeadline);
+        }
+
+        let bid_id = Self::next_bid_id(&env)?;
 
         let bid = Bid {
             agent: agent_owner.clone(),
@@ -1190,6 +1220,7 @@ impl AiAgentMarketplace {
             proposal,
             submitted_at: now,
             status: BidStatus::Pending,
+            valid_until,
         };
 
         env.storage().instance().set(&DataKey::Bid(bid_id), &bid);
@@ -1376,6 +1407,11 @@ impl AiAgentMarketplace {
                 return Err(Error::BidRejected);
             }
             return Err(Error::BidNotPending);
+        }
+
+        // #133: an expired bid can no longer be accepted.
+        if env.ledger().timestamp() > bid.valid_until {
+            return Err(Error::BidExpired);
         }
 
         // #169: refuse to accept a bid from an agent that cannot receive USDC,
@@ -3009,6 +3045,29 @@ impl AiAgentMarketplace {
         Ok(())
     }
 
+    /// #133: Admin sets the default and maximum validity, in days, of bids.
+    pub fn set_bid_validity(
+        env: Env,
+        admin: Address,
+        default_bid_validity_days: u64,
+        max_bid_validity_days: u64,
+    ) -> Result<(), Error> {
+        admin.require_auth();
+        let mut config = Self::get_config(&env)?;
+        if config.admin != admin {
+            return Err(Error::Unauthorized);
+        }
+        config.default_bid_validity_days = default_bid_validity_days;
+        config.max_bid_validity_days = max_bid_validity_days;
+        Self::validate_config(&config)?;
+        env.storage().instance().set(&DataKey::Config, &config);
+        env.events().publish(
+            (symbol_short!("config_upd"), symbol_short!("bid_valid")),
+            (default_bid_validity_days, max_bid_validity_days),
+        );
+        Ok(())
+    }
+
     /// Admin: Add skill verifier
     pub fn add_skill_verifier(env: Env, admin: Address, verifier: Address) -> Result<(), Error> {
         admin.require_auth();
@@ -3122,6 +3181,11 @@ impl AiAgentMarketplace {
             return Err(Error::InvalidConfig);
         }
         if config.min_agent_reputation_to_bid > 100 {
+            return Err(Error::InvalidConfig);
+        }
+        if config.default_bid_validity_days == 0
+            || config.default_bid_validity_days > config.max_bid_validity_days
+        {
             return Err(Error::InvalidConfig);
         }
         Ok(())
@@ -3437,3 +3501,6 @@ mod negative_post_job_test;
 
 #[cfg(test)]
 mod negative_cancel_job_test;
+
+#[cfg(test)]
+mod bid_expiry_test;

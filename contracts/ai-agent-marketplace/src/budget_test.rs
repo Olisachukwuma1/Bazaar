@@ -115,7 +115,7 @@ fn budget_per_entrypoint_within_mainnet_limits() {
         )
     });
     let bid_id = measure(&env, "place_bid", || {
-        market.place_bid(&agent, &job_id, &budget, &5, &String::from_str(&env, "proposal"))
+        market.place_bid(&agent, &job_id, &budget, &5, &String::from_str(&env, "proposal"), &0)
     });
     measure(&env, "accept_bid", || market.accept_bid(&client, &job_id, &bid_id));
 
@@ -139,6 +139,7 @@ fn budget_per_entrypoint_within_mainnet_limits() {
             &budget,
             &5,
             &String::from_str(&env, "p"),
+            &0,
         );
         capped_bid_id = id;
     }
@@ -163,7 +164,7 @@ fn budget_per_entrypoint_within_mainnet_limits() {
         &budget,
         &7,
     );
-    let bid_id = market.place_bid(&agent, &job_id, &budget, &5, &String::from_str(&env, "p"));
+    let bid_id = market.place_bid(&agent, &job_id, &budget, &5, &String::from_str(&env, "p"), &0);
     market.accept_bid(&client, &job_id, &bid_id);
     let dispute_id = measure(&env, "raise_dispute", || {
         market.raise_dispute(
