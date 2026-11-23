@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import * as freighter from '@stellar/freighter-api';
 import { Horizon } from '@stellar/stellar-sdk';
 import { networkConfig } from '../config/network';
@@ -191,8 +192,12 @@ const INITIAL_STATE: WalletState = {
   blockedReason: null,
 };
 
+/** How often to check whether the user switched accounts in the extension. */
+const WALLET_POLL_INTERVAL_MS = 3000;
+
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, setState] = useState<WalletState>(INITIAL_STATE);
+  const queryClient = useQueryClient();
   const [isFreighterInstalled, setIsFreighterInstalled] = useState(false);
 
   const checkConnection = useCallback(async () => {
@@ -222,6 +227,77 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     checkConnection();
   }, [checkConnection]);
+
+  /** Drop every cached query scoped to a previous account's public key. */
+  const clearUserScopedQueries = useCallback(
+    (publicKey: string) => {
+      queryClient.removeQueries({
+        predicate: (query) => query.queryKey.includes(publicKey),
+      });
+    },
+    [queryClient],
+  );
+
+  // Watch for account switches in the Freighter extension (it has no reliable
+  // push event across API versions, so poll while connected and re-check when
+  // the tab regains focus). Cleaned up on unmount / disconnect.
+  const currentKey = state.publicKey;
+  const currentNetwork = state.network;
+  const isConnectedNow = state.isConnected;
+  const lastKeyRef = useRef<string | null>(null);
+  lastKeyRef.current = currentKey;
+
+  useEffect(() => {
+    if (!isConnectedNow) return;
+    let cancelled = false;
+    let inFlight = false;
+
+    const check = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const next = await freighter.getPublicKey();
+        const prev = lastKeyRef.current;
+        if (cancelled || !next || !prev || next === prev) return;
+
+        clearUserScopedQueries(prev);
+        lastKeyRef.current = next;
+
+        if (!hasAcceptedTerms(next)) {
+          // New account hasn't accepted the terms: require an explicit reconnect.
+          setState(INITIAL_STATE);
+          return;
+        }
+        const blocked = isAddressBlocked(next);
+        setState((p) => ({
+          ...p,
+          publicKey: next,
+          xlmBalance: '0',
+          usdcBalance: '0',
+          isBlocked: blocked,
+          blockedReason: blocked
+            ? 'This wallet address is restricted by compliance policy.'
+            : null,
+        }));
+        const balances = await fetchBalances(next, currentNetwork);
+        if (!cancelled && lastKeyRef.current === next) {
+          setState((p) => ({ ...p, ...balances }));
+        }
+      } catch {
+        // Wallet locked or unavailable; try again on the next tick.
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const id = window.setInterval(check, WALLET_POLL_INTERVAL_MS);
+    window.addEventListener('focus', check);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      window.removeEventListener('focus', check);
+    };
+  }, [isConnectedNow, currentNetwork, clearUserScopedQueries]);
 
   const connect = async () => {
     setState((prev) => ({ ...prev, isConnecting: true }));
